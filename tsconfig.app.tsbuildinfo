@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/emergencytable.tsx","./src/components/locationpermissionpopup.tsx","./src/components/sosbutton.tsx","./src/components/vietnammap.tsx","./src/data/mockemergencies.ts","./src/pages/hospitaldashboardpage.tsx","./src/pages/userpage.tsx","./src/types/emergency.ts"],"version":"5.9.3"}

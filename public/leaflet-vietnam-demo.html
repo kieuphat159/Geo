@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bản Đồ Việt Nam - Leaflet</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        background: #f4f0e8;
+      }
+
+      .shell {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 12px;
+      }
+
+      .top-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .top-bar button {
+        border: none;
+        border-radius: 10px;
+        background: #1f1a17;
+        color: #fff;
+        padding: 9px 12px;
+        cursor: pointer;
+      }
+
+      #status {
+        color: #4e4035;
+        font-size: 14px;
+      }
+
+      #map {
+        height: calc(100dvh - 84px);
+        min-height: 460px;
+        border-radius: 14px;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="top-bar">
+        <button id="btn-location" type="button">Xin quyền vị trí</button>
+        <div id="status">Chưa cấp quyền vị trí.</div>
+      </div>
+      <div id="map"></div>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="./leaflet-vietnam-demo.js"></script>
+  </body>
+</html>

@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+  }
+
+  body {
+    @apply text-[#1f1a17] antialiased;
+    background: radial-gradient(circle at top left, #fffdf8 0%, #f4f0e8 55%, #e9ddcd 100%);
+    font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  button {
+    font: inherit;
+  }
+}
+
+.empty-state {
+  color: var(--muted);
+  padding: 10px;
+}
+
+.map-placeholder-card {
+  min-height: 300px;
+}
+
+.map-placeholder {
+  border: 2px dashed #b8a894;
+  border-radius: 14px;
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  background: linear-gradient(135deg, #f9f3e9 0%, #fffdf8 100%);
+  padding: 16px;
+}
+
+.map-placeholder span {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.map-placeholder p {
+  margin: 8px 0 0;
+  max-width: 420px;
+  color: var(--muted);
+}
+
+@media (min-width: 980px) {
+  .hospital-screen {
+    padding: 24px;
+  }
+
+  .hospital-main-grid {
+    grid-template-columns: 1.4fr 1fr;
+    align-items: start;
+  }
+
+  .map-placeholder-card {
+    min-height: 100%;
+  }
+}
