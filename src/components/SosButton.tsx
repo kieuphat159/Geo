@@ -1,28 +1,39 @@
+import { guestStrings } from "../constants/guestStrings";
+
 interface SosButtonProps {
-  onClick?: () => void;
+    onClick?: () => void;
+    disabled?: boolean;
+    variant?: "floating" | "panel";
 }
 
-export default function SosButton({ onClick }: SosButtonProps) {
-  return (
-    <div className="relative flex items-center justify-center">
-      {/* Pulsing background rings */}
-      <div className="absolute h-[min(78vw,360px)] w-[min(78vw,360px)] animate-[ping_2.5s_cubic-bezier(0,0,0.2,1)_infinite] rounded-full bg-red-500/30"></div>
-      <div className="absolute h-[min(78vw,360px)] w-[min(78vw,360px)] animate-[ping_2.5s_cubic-bezier(0,0,0.2,1)_1s_infinite] rounded-full bg-red-400/20"></div>
-      
-      {/* Main Button */}
-      <button
-        className="pointer-events-auto relative z-10 flex h-[min(78vw,360px)] w-[min(78vw,360px)] flex-col items-center justify-center rounded-full border-[10px] border-white/20 bg-gradient-to-br from-red-400 via-red-500 to-rose-600 text-white shadow-[0_0_80px_rgba(225,29,72,0.6)] backdrop-blur-md transition-all duration-300 hover:scale-105 hover:shadow-[0_0_100px_rgba(225,29,72,0.8)] active:scale-95"
-        type="button"
-        onClick={onClick}
-        aria-label="SOS khẩn cấp"
-      >
-        <span className="text-[clamp(1.5rem,6vw,2.5rem)] font-black tracking-widest drop-shadow-md">
-          SOS
-        </span>
-        <span className="mt-1 text-[clamp(0.875rem,3vw,1.25rem)] font-bold uppercase tracking-widest text-red-50 opacity-90">
-          Khẩn cấp
-        </span>
-      </button>
-    </div>
-  );
+export default function SosButton({ onClick, disabled = false, variant = "floating" }: SosButtonProps) {
+    const containerClassName =
+        variant === "panel"
+            ? "relative flex w-full items-center justify-center"
+            : "relative flex items-center justify-center";
+
+    const pulseClassName =
+        variant === "panel"
+            ? "absolute h-20 w-[78%] animate-ping rounded-3xl bg-red-500/20"
+            : "absolute h-24 w-24 animate-ping rounded-full bg-red-500/35";
+
+    const buttonClassName =
+        variant === "panel"
+            ? "pointer-events-auto relative z-10 flex min-h-14 w-full items-center justify-center rounded-xl border-4 border-white/30 bg-gradient-to-b from-red-500 to-red-700 px-6 py-3 text-base font-extrabold text-white shadow-[0_14px_45px_rgba(220,38,38,0.55)] transition hover:scale-[1.01] active:scale-95 disabled:cursor-not-allowed disabled:from-red-400 disabled:to-red-500"
+            : "pointer-events-auto relative z-10 flex min-h-14 min-w-[200px] items-center justify-center rounded-full border-4 border-white/30 bg-gradient-to-b from-red-500 to-red-700 px-6 py-3 text-base font-extrabold text-white shadow-[0_14px_45px_rgba(220,38,38,0.55)] transition hover:scale-[1.03] active:scale-95 disabled:cursor-not-allowed disabled:from-red-400 disabled:to-red-500 md:min-w-[220px] lg:min-w-[200px] lg:px-10 lg:py-4";
+
+    return (
+        <div className={containerClassName}>
+            <div className={pulseClassName}></div>
+            <button
+                className={buttonClassName}
+                type="button"
+                onClick={onClick}
+                disabled={disabled}
+                aria-label="Emergency SOS"
+            >
+                {guestStrings.sosButton}
+            </button>
+        </div>
+    );
 }
