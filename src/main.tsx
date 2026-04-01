@@ -7,13 +7,13 @@ import "./styles/global.css";
 import "leaflet/dist/leaflet.css";
 
 if (import.meta.env.VITE_USE_MOCK === "true") {
-  initMockBackend();
+    initMockBackend();
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </React.StrictMode>
+    <React.StrictMode>
+        <BrowserRouter>
+            <App />
+        </BrowserRouter>
+    </React.StrictMode>,
 );

@@ -64,79 +64,83 @@ export default function FacilityFilterPanel({
             )}
             <div className="shrink-0 flex flex-col">
                 <h2 className="text-sm font-bold uppercase tracking-wide text-slate-700">
-                {guestStrings.facilityPanelTitle}
-            </h2>
+                    {guestStrings.facilityPanelTitle}
+                </h2>
 
-            <div className="mt-3 grid grid-cols-2 gap-2">
-                {filterButtons.map((item) => {
-                    const isActive = item.value === filterType;
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                    {filterButtons.map((item) => {
+                        const isActive = item.value === filterType;
 
-                    return (
-                        <button
-                            key={String(item.value)}
-                            className={`min-h-12 rounded-xl px-3 py-2 text-sm font-semibold transition-all ${
-                                isActive
-                                    ? "bg-slate-900 text-white shadow"
-                                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                            }`}
-                            type="button"
-                            onClick={() => onFilterTypeChange(item.value)}
-                        >
-                            {item.label}
-                        </button>
-                    );
-                })}
-            </div>
-
-            <label className="mt-3 block">
-                <span className="sr-only">{guestStrings.searchPlaceholder}</span>
-                <input
-                    className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none ring-red-500 transition focus:border-red-300 focus:ring-2"
-                    type="text"
-                    value={searchText}
-                    placeholder={guestStrings.searchPlaceholder}
-                    onChange={(event) => onSearchTextChange(event.target.value)}
-                />
-            </label>
-
-            <div className="mt-3 space-y-2">
-                <div className="flex items-center justify-between text-xs font-medium text-slate-600">
-                    <span>{guestStrings.radiusLabel}</span>
-                    <span>{Math.round(radius / 100) / 10} km</span>
+                        return (
+                            <button
+                                key={String(item.value)}
+                                className={`min-h-12 rounded-xl px-3 py-2 text-sm font-semibold transition-all ${
+                                    isActive
+                                        ? "bg-slate-900 text-white shadow"
+                                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                                }`}
+                                type="button"
+                                onClick={() => onFilterTypeChange(item.value)}
+                            >
+                                {item.label}
+                            </button>
+                        );
+                    })}
                 </div>
-                <input
-                    className="h-2 w-full cursor-pointer accent-red-500"
-                    type="range"
-                    min={500}
-                    max={5000}
-                    step={100}
-                    value={radius}
-                    onChange={(event) => onRadiusChange(Number(event.target.value))}
-                />
-            </div>
 
-            <p 
-                className="mt-3 text-xs text-slate-600 md:cursor-auto cursor-pointer flex justify-between items-center" 
-                aria-live="polite"
-                onClick={() => variant === "floating" && setIsExpanded(!isExpanded)}
-            >      
-                <span>
-                    {isLoading ? guestStrings.loadingFacilities : `${resultCount} ${guestStrings.searchResultSuffix}`}
-                </span>
-                {variant === "floating" && (
-                    <span className="md:hidden text-slate-400">{isExpanded ? "▼" : "▲"}</span>
-                )}
-            </p>
+                <label className="mt-3 block">
+                    <span className="sr-only">{guestStrings.searchPlaceholder}</span>
+                    <input
+                        className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none ring-red-500 transition focus:border-red-300 focus:ring-2"
+                        type="text"
+                        value={searchText}
+                        placeholder={guestStrings.searchPlaceholder}
+                        onChange={(event) => onSearchTextChange(event.target.value)}
+                    />
+                </label>
 
-            {errorMessage ? (
-                <p className="mt-1 text-xs font-medium text-red-600 shrink-0" role="alert">
-                    {errorMessage}
+                <div className="mt-3 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-medium text-slate-600">
+                        <span>{guestStrings.radiusLabel}</span>
+                        <span>{Math.round(radius / 100) / 10} km</span>
+                    </div>
+                    <input
+                        className="h-2 w-full cursor-pointer accent-red-500"
+                        type="range"
+                        min={500}
+                        max={5000}
+                        step={100}
+                        value={radius}
+                        onChange={(event) => onRadiusChange(Number(event.target.value))}
+                    />
+                </div>
+
+                <p
+                    className="mt-3 text-xs text-slate-600 md:cursor-auto cursor-pointer flex justify-between items-center"
+                    aria-live="polite"
+                    onClick={() => variant === "floating" && setIsExpanded(!isExpanded)}
+                >
+                    <span>
+                        {isLoading
+                            ? guestStrings.loadingFacilities
+                            : `${resultCount} ${guestStrings.searchResultSuffix}`}
+                    </span>
+                    {variant === "floating" && (
+                        <span className="md:hidden text-slate-400">{isExpanded ? "▼" : "▲"}</span>
+                    )}
                 </p>
-            ) : null}
+
+                {errorMessage ? (
+                    <p className="mt-1 text-xs font-medium text-red-600 shrink-0" role="alert">
+                        {errorMessage}
+                    </p>
+                ) : null}
             </div>
 
             {children && (
-                <div className={`mt-3 flex-1 min-h-0 overflow-y-auto pb-4 ${variant === "floating" && !isExpanded ? 'hidden md:block' : 'block'}`}>
+                <div
+                    className={`mt-3 flex-1 min-h-0 overflow-y-auto pb-4 ${variant === "floating" && !isExpanded ? "hidden md:block" : "block"}`}
+                >
                     {children}
                 </div>
             )}

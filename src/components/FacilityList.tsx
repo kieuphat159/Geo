@@ -33,12 +33,7 @@ function getTypeBadgeClass(type: Facility["type"]): string {
     return "bg-emerald-100 text-emerald-700";
 }
 
-export default function FacilityList({
-    facilities,
-    isLoading,
-    errorMessage,
-    onSelectFacility,
-}: FacilityListProps) {
+export default function FacilityList({ facilities, isLoading, errorMessage, onSelectFacility }: FacilityListProps) {
     if (isLoading) {
         return (
             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600">

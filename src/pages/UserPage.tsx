@@ -400,7 +400,9 @@ export default function UserPage() {
             <aside className="relative hidden h-dvh w-[380px] flex-col overflow-hidden border-r border-slate-200/70 bg-white/85 backdrop-blur lg:flex">
                 <div className="flex min-h-0 flex-1 flex-col px-4 pt-[max(1rem,env(safe-area-inset-top))]">
                     <div className="mb-4 shrink-0 rounded-2xl border border-slate-200/90 bg-white px-4 py-3 shadow-sm">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Emergency console</p>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Emergency console
+                        </p>
                         <h1 className="mt-1 text-lg font-bold text-slate-900">Emergency Support Map</h1>
 
                         <div className="mt-3 flex items-center gap-2">
@@ -565,7 +567,6 @@ export default function UserPage() {
                         </button>
                     </div>
                 ) : null}
-
             </section>
 
             <div className="pointer-events-none fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-[1000] -translate-x-1/2 lg:bottom-8 lg:left-[calc(380px+(100vw-380px)/2)]">

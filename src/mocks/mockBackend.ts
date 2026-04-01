@@ -200,10 +200,7 @@ function buildTrackingPoints(start: [number, number], target: [number, number], 
         const ratio = (index + 1) / steps;
         const wobble = index < steps - 1 ? Math.sin(index) * 0.00018 : 0;
 
-        return [
-            startLat + (targetLat - startLat) * ratio + wobble,
-            startLng + (targetLng - startLng) * ratio - wobble,
-        ];
+        return [startLat + (targetLat - startLat) * ratio + wobble, startLng + (targetLng - startLng) * ratio - wobble];
     });
 }
 
@@ -375,7 +372,9 @@ export function initMockBackend(): void {
 
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const requestUrl = toAbsoluteUrl(input);
-        const method = (init?.method ?? (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET"))
+        const method = (
+            init?.method ?? (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")
+        )
             .toUpperCase()
             .trim();
 
