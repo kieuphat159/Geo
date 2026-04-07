@@ -1,128 +1,636 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import LocationPermissionPopup from "../components/LocationPermissionPopup";
+import FacilityDetailSheet from "../components/FacilityDetailSheet";
+import FacilityFilterPanel from "../components/FacilityFilterPanel";
+import FacilityList from "../components/FacilityList";
 import SosButton from "../components/SosButton";
+import SosConfirmationModal from "../components/SosConfirmationModal";
+import TrackingStatusBar from "../components/TrackingStatusBar";
 import VietnamMap from "../components/VietnamMap";
+import { guestStrings } from "../constants/guestStrings";
+import { useAnimatedPosition } from "../hooks/useAnimatedPosition";
+import { useTrackingSocket } from "../hooks/useTrackingSocket";
+import { fetchFacilities, sendEmergencySos } from "../services/guestApi";
+import type {
+    AssignedHospital,
+    Facility,
+    FacilityFilterType,
+    GeoJsonLineString,
+    SosResponse,
+    TrackingSocketEvent,
+} from "../types/guest";
+
+const HCMC_CENTER: [number, number] = [10.7769, 106.7009];
+const SOS_SUCCESS_OVERLAY_MS = 1800;
+
+type GuestMode = "browse" | "tracking" | "completed";
+
+function normalizePhoneInput(value: string): string {
+    return value.replace(/[^\d]/g, "");
+}
+
+function coordinateToLatLng(point: [number, number]): [number, number] {
+    const [first, second] = point;
+
+    if (Math.abs(first) <= 90 && Math.abs(second) > 90) {
+        return [first, second];
+    }
+
+    if (Math.abs(first) > 90 && Math.abs(second) <= 90) {
+        return [second, first];
+    }
+
+    return [second, first];
+}
+
+function toRouteLatLng(routePath: GeoJsonLineString | [number, number][] | undefined): [number, number][] {
+    if (!routePath) {
+        return [];
+    }
+
+    const coordinates = Array.isArray(routePath) ? routePath : routePath.coordinates;
+
+    return coordinates
+        .map((point) => {
+            if (!Array.isArray(point) || point.length < 2) {
+                return null;
+            }
+
+            const first = Number(point[0]);
+            const second = Number(point[1]);
+
+            if (!Number.isFinite(first) || !Number.isFinite(second)) {
+                return null;
+            }
+
+            return coordinateToLatLng([first, second]);
+        })
+        .filter((point): point is [number, number] => Boolean(point));
+}
+
+function trackingMessageFromStatus(status?: string): string {
+    if (!status) {
+        return guestStrings.trackingFallback;
+    }
+
+    const normalizedStatus = status.toUpperCase();
+    if (normalizedStatus === "ASSIGNED") {
+        return guestStrings.trackingAssigned;
+    }
+
+    if (normalizedStatus === "ON_THE_WAY") {
+        return guestStrings.trackingFallback;
+    }
+
+    return guestStrings.trackingFallback;
+}
+
+function requestCurrentGpsPosition(): Promise<[number, number]> {
+    return new Promise((resolve, reject) => {
+        if (typeof navigator === "undefined" || !navigator.geolocation) {
+            reject(new Error("Geolocation is unavailable."));
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                resolve([position.coords.latitude, position.coords.longitude]);
+            },
+            (error) => {
+                reject(error);
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 12000,
+                maximumAge: 0,
+            },
+        );
+    });
+}
 
 export default function UserPage() {
-  const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
-  const [showPermissionHelp, setShowPermissionHelp] = useState(false);
-  const [geoMessage, setGeoMessage] = useState<string>("Chưa cấp quyền vị trí.");
+    const [mode, setMode] = useState<GuestMode>("browse");
+    const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
+    const [statusMessage, setStatusMessage] = useState<string>(guestStrings.locationStatusUnknown);
+    const [locationError, setLocationError] = useState<string | null>(null);
+    const [isLocating, setIsLocating] = useState(false);
 
-  const canUseGeolocation = useMemo(() => typeof navigator !== "undefined" && !!navigator.geolocation, []);
+    const [filterType, setFilterType] = useState<FacilityFilterType>("all");
+    const [searchText, setSearchText] = useState("");
+    const [radius, setRadius] = useState(2000);
 
-  useEffect(() => {
-    const cachedLocation = localStorage.getItem("lastKnownUserLocation");
-    if (!cachedLocation) {
-      return;
-    }
+    const [facilities, setFacilities] = useState<Facility[]>([]);
+    const [facilityError, setFacilityError] = useState<string | null>(null);
+    const [isFacilityLoading, setIsFacilityLoading] = useState(false);
+    const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
 
-    try {
-      const parsed = JSON.parse(cachedLocation) as { latitude: number; longitude: number };
-      setCurrentPosition([parsed.latitude, parsed.longitude]);
-      setGeoMessage("Đã tải vị trí gần nhất từ bộ nhớ trình duyệt.");
-    } catch {
-      localStorage.removeItem("lastKnownUserLocation");
-    }
-  }, []);
+    const [sosPreviewPosition, setSosPreviewPosition] = useState<[number, number] | null>(null);
+    const [isSosModalOpen, setIsSosModalOpen] = useState(false);
+    const [victimPhone, setVictimPhone] = useState("");
+    const [phoneError, setPhoneError] = useState<string | null>(null);
+    const [sosSubmitError, setSosSubmitError] = useState<string | null>(null);
+    const [isSendingSos, setIsSendingSos] = useState(false);
+    const [showSosSuccess, setShowSosSuccess] = useState(false);
 
-  const requestLocationPermission = () => {
-    if (!canUseGeolocation) {
-      setShowPermissionHelp(true);
-      setGeoMessage("Trình duyệt này không hỗ trợ geolocation.");
-      return;
-    }
+    const [activeRequestId, setActiveRequestId] = useState<number | null>(null);
+    const [sosPosition, setSosPosition] = useState<[number, number] | null>(null);
+    const [assignedHospital, setAssignedHospital] = useState<AssignedHospital | null>(null);
+    const [routePath, setRoutePath] = useState<[number, number][]>([]);
+    const [ambulanceTargetPosition, setAmbulanceTargetPosition] = useState<[number, number] | null>(null);
+    const [etaMinutes, setEtaMinutes] = useState<number | null>(null);
+    const [trackingStatusMessage, setTrackingStatusMessage] = useState<string>(guestStrings.trackingFallback);
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const nextPosition: [number, number] = [position.coords.latitude, position.coords.longitude];
-        setCurrentPosition(nextPosition);
+    const animatedAmbulancePosition = useAnimatedPosition(ambulanceTargetPosition, 800);
+
+    const lookupPosition = useMemo<[number, number]>(() => currentPosition ?? HCMC_CENTER, [currentPosition]);
+
+    useEffect(() => {
+        const cachedLocation = localStorage.getItem("guest:last-location");
+        if (!cachedLocation) {
+            return;
+        }
+
+        try {
+            const parsed = JSON.parse(cachedLocation) as { latitude: number; longitude: number };
+            if (Number.isFinite(parsed.latitude) && Number.isFinite(parsed.longitude)) {
+                setCurrentPosition([parsed.latitude, parsed.longitude]);
+                setStatusMessage(guestStrings.locationReady);
+            }
+        } catch {
+            localStorage.removeItem("guest:last-location");
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!currentPosition) {
+            return;
+        }
+
         localStorage.setItem(
-          "lastKnownUserLocation",
-          JSON.stringify({ latitude: nextPosition[0], longitude: nextPosition[1] })
+            "guest:last-location",
+            JSON.stringify({ latitude: currentPosition[0], longitude: currentPosition[1] }),
         );
-        setGeoMessage("Đã cập nhật vị trí hiện tại.");
-        setShowPermissionHelp(false);
-      },
-      () => {
-        setGeoMessage("Bạn đã từ chối quyền vị trí hoặc chưa bật GPS.");
-        setShowPermissionHelp(true);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
-      }
+    }, [currentPosition]);
+
+    useEffect(() => {
+        let isMounted = true;
+        const controller = new AbortController();
+
+        const timer = window.setTimeout(async () => {
+            setIsFacilityLoading(true);
+            setFacilityError(null);
+
+            try {
+                const rows = await fetchFacilities(
+                    {
+                        type: filterType,
+                        query: searchText,
+                        radius,
+                        lat: lookupPosition[0],
+                        lng: lookupPosition[1],
+                    },
+                    controller.signal,
+                );
+
+                if (!isMounted) {
+                    return;
+                }
+
+                setFacilities(rows);
+                setSelectedFacility((previous) =>
+                    previous ? (rows.find((facility) => facility.id === previous.id) ?? null) : null,
+                );
+            } catch (error) {
+                const errorName = (error as { name?: string }).name;
+                if (errorName === "AbortError" || !isMounted) {
+                    return;
+                }
+
+                setFacilityError(guestStrings.facilityLoadError);
+                setFacilities([]);
+            } finally {
+                if (isMounted) {
+                    setIsFacilityLoading(false);
+                }
+            }
+        }, 250);
+
+        return () => {
+            isMounted = false;
+            controller.abort();
+            window.clearTimeout(timer);
+        };
+    }, [filterType, lookupPosition, radius, searchText]);
+
+    const acquireCurrentLocation = useCallback(async (): Promise<[number, number] | null> => {
+        setLocationError(null);
+        setStatusMessage(guestStrings.locationRequesting);
+        setIsLocating(true);
+
+        try {
+            const position = await requestCurrentGpsPosition();
+            setCurrentPosition(position);
+            setStatusMessage(guestStrings.locationReady);
+            return position;
+        } catch (error) {
+            const code = (error as { code?: number }).code;
+
+            if (code === 1) {
+                setLocationError(guestStrings.locationDenied);
+                setStatusMessage(guestStrings.locationDenied);
+            } else {
+                setLocationError(guestStrings.locationFailed);
+                setStatusMessage(guestStrings.locationFailed);
+            }
+
+            return null;
+        } finally {
+            setIsLocating(false);
+        }
+    }, []);
+
+    const handleSosClick = useCallback(async () => {
+        setSosSubmitError(null);
+        setPhoneError(null);
+
+        const position = await acquireCurrentLocation();
+        if (!position) {
+            return;
+        }
+
+        setSosPreviewPosition(position);
+        setIsSosModalOpen(true);
+    }, [acquireCurrentLocation]);
+
+    const applySosSuccess = useCallback((response: SosResponse, victimPosition: [number, number]) => {
+        setActiveRequestId(response.request_id);
+        setSosPosition(victimPosition);
+        setAssignedHospital(response.assigned_hospital ?? null);
+
+        const parsedRoute = toRouteLatLng(response.route_path);
+        if (parsedRoute.length >= 2) {
+            setRoutePath(parsedRoute);
+        } else if (response.assigned_hospital) {
+            setRoutePath([
+                [response.assigned_hospital.lat, response.assigned_hospital.lng],
+                [victimPosition[0], victimPosition[1]],
+            ]);
+        } else {
+            setRoutePath([]);
+        }
+
+        if (response.assigned_hospital) {
+            setAmbulanceTargetPosition([response.assigned_hospital.lat, response.assigned_hospital.lng]);
+        } else {
+            setAmbulanceTargetPosition(victimPosition);
+        }
+
+        if (typeof response.eta_minutes === "number" && Number.isFinite(response.eta_minutes)) {
+            setEtaMinutes(Math.max(1, Math.round(response.eta_minutes)));
+        } else {
+            setEtaMinutes(null);
+        }
+
+        setTrackingStatusMessage(guestStrings.trackingFallback);
+        setMode("tracking");
+        setShowSosSuccess(true);
+    }, []);
+
+    const handleConfirmSos = useCallback(async () => {
+        if (!sosPreviewPosition) {
+            return;
+        }
+
+        const normalizedPhone = normalizePhoneInput(victimPhone);
+        if (!normalizedPhone) {
+            setPhoneError(guestStrings.sosPhoneRequired);
+            return;
+        }
+
+        if (!/^\d{9,15}$/.test(normalizedPhone)) {
+            setPhoneError(guestStrings.sosPhoneInvalid);
+            return;
+        }
+
+        setPhoneError(null);
+        setSosSubmitError(null);
+        setIsSendingSos(true);
+
+        try {
+            const response = await sendEmergencySos({
+                victim_phone: normalizedPhone,
+                lat: sosPreviewPosition[0],
+                lng: sosPreviewPosition[1],
+            });
+
+            applySosSuccess(response, sosPreviewPosition);
+            setIsSosModalOpen(false);
+            setSelectedFacility(null);
+        } catch {
+            setSosSubmitError(guestStrings.sosSendFailed);
+        } finally {
+            setIsSendingSos(false);
+        }
+    }, [applySosSuccess, sosPreviewPosition, victimPhone]);
+
+    const handleTrackingEvent = useCallback((event: TrackingSocketEvent) => {
+        if (typeof event.lat === "number" && typeof event.lng === "number") {
+            setAmbulanceTargetPosition([event.lat, event.lng]);
+        }
+
+        if (typeof event.eta_minutes === "number" && Number.isFinite(event.eta_minutes)) {
+            setEtaMinutes(Math.max(1, Math.round(event.eta_minutes)));
+        }
+
+        if (event.route_path) {
+            const parsedRoute = toRouteLatLng(event.route_path);
+            if (parsedRoute.length >= 2) {
+                setRoutePath(parsedRoute);
+            }
+        }
+
+        if (event.status && event.status.toUpperCase() === "COMPLETED") {
+            setMode("completed");
+            setTrackingStatusMessage(guestStrings.rescueCompleted);
+            setShowSosSuccess(false);
+            return;
+        }
+
+        setTrackingStatusMessage(trackingMessageFromStatus(event.status));
+    }, []);
+
+    const { isReconnecting } = useTrackingSocket({
+        requestId: activeRequestId,
+        enabled: activeRequestId !== null && mode !== "completed",
+        onEvent: handleTrackingEvent,
+    });
+
+    useEffect(() => {
+        if (!showSosSuccess) {
+            return;
+        }
+
+        const timer = window.setTimeout(() => {
+            setShowSosSuccess(false);
+        }, SOS_SUCCESS_OVERLAY_MS);
+
+        return () => {
+            window.clearTimeout(timer);
+        };
+    }, [showSosSuccess]);
+
+    const clearTrackingState = () => {
+        setMode("browse");
+        setActiveRequestId(null);
+        setAssignedHospital(null);
+        setRoutePath([]);
+        setSosPosition(null);
+        setAmbulanceTargetPosition(null);
+        setEtaMinutes(null);
+        setTrackingStatusMessage(guestStrings.trackingFallback);
+    };
+
+    const listFeedbackMessage =
+        facilityError || (!isFacilityLoading && facilities.length === 0 ? guestStrings.noFacilities : null);
+
+    const mapLayoutSignature = `${mode}-${selectedFacility ? "detail" : "list"}`;
+
+    return (
+        <main className="relative h-dvh w-screen overflow-hidden bg-slate-900 lg:grid lg:grid-cols-[380px_minmax(0,1fr)]">
+            <aside className="relative hidden h-dvh w-[380px] flex-col overflow-hidden border-r border-slate-200/70 bg-white/85 backdrop-blur lg:flex">
+                <div className="flex min-h-0 flex-1 flex-col px-4 pt-[max(1rem,env(safe-area-inset-top))]">
+                    <div className="mb-4 shrink-0 rounded-2xl border border-slate-200/90 bg-white px-4 py-3 shadow-sm">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Emergency console
+                        </p>
+                        <h1 className="mt-1 text-lg font-bold text-slate-900">Emergency Support Map</h1>
+
+                        <div className="mt-3 flex items-center gap-2">
+                            <button
+                                className="min-h-12 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-800 transition hover:bg-slate-200"
+                                type="button"
+                                onClick={acquireCurrentLocation}
+                                disabled={isLocating}
+                            >
+                                {guestStrings.locateButton}
+                            </button>
+                            <Link
+                                className="inline-flex min-h-12 items-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white shadow transition hover:bg-slate-800"
+                                to="/hospital"
+                            >
+                                {guestStrings.hospitalScreenButton}
+                            </Link>
+                        </div>
+
+                        <p className="mt-3 rounded-xl bg-slate-900 px-3 py-2 text-xs font-medium text-slate-100">
+                            {statusMessage}
+                        </p>
+                    </div>
+
+                    {mode === "browse" ? (
+                        <>
+                            <div className="shrink-0">
+                                <FacilityFilterPanel
+                                    filterType={filterType}
+                                    searchText={searchText}
+                                    radius={radius}
+                                    isLoading={isFacilityLoading}
+                                    resultCount={facilities.length}
+                                    errorMessage={null}
+                                    variant="panel"
+                                    onFilterTypeChange={setFilterType}
+                                    onSearchTextChange={setSearchText}
+                                    onRadiusChange={setRadius}
+                                />
+                            </div>
+
+                            <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1 pb-20">
+                                {selectedFacility ? (
+                                    <FacilityDetailSheet
+                                        facility={selectedFacility}
+                                        hasUserLocation={Boolean(currentPosition)}
+                                        variant="panel"
+                                        onClose={() => setSelectedFacility(null)}
+                                        onDirectionsBlocked={() => setLocationError(guestStrings.directionsNeedGps)}
+                                    />
+                                ) : (
+                                    <FacilityList
+                                        facilities={facilities}
+                                        isLoading={isFacilityLoading}
+                                        errorMessage={listFeedbackMessage}
+                                        onSelectFacility={setSelectedFacility}
+                                    />
+                                )}
+                            </div>
+                        </>
+                    ) : (
+                        <div className="shrink-0 rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm">
+                            <h2 className="text-sm font-bold uppercase tracking-wide text-slate-700">
+                                {guestStrings.trackingModeBadge}
+                            </h2>
+                            <p className="mt-2 text-sm font-medium text-slate-700">
+                                {mode === "tracking" ? trackingStatusMessage : guestStrings.rescueCompleted}
+                            </p>
+                            {mode === "tracking" && etaMinutes !== null ? (
+                                <p className="mt-1 text-sm font-semibold text-slate-900">
+                                    {guestStrings.trackingEtaPrefix} ~{etaMinutes} {guestStrings.trackingEtaSuffix}
+                                </p>
+                            ) : null}
+                        </div>
+                    )}
+                </div>
+            </aside>
+
+            <section className="relative h-full w-full min-w-0">
+                <VietnamMap
+                    defaultCenter={HCMC_CENTER}
+                    mode={mode}
+                    currentPosition={currentPosition}
+                    facilities={facilities}
+                    onFacilitySelect={setSelectedFacility}
+                    sosPosition={sosPosition}
+                    assignedHospital={assignedHospital}
+                    ambulancePosition={animatedAmbulancePosition}
+                    routePath={routePath}
+                    layoutSignature={mapLayoutSignature}
+                />
+
+                <header className="pointer-events-none absolute left-0 right-0 top-0 z-[690] p-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:hidden">
+                    <div className="pointer-events-auto mx-auto flex w-full max-w-[430px] items-center justify-between gap-2 md:ml-[336px] md:mr-3 md:max-w-none md:justify-end">
+                        <button
+                            className="min-h-12 rounded-xl bg-white/95 px-4 text-sm font-semibold text-slate-800 shadow hover:bg-white"
+                            type="button"
+                            onClick={acquireCurrentLocation}
+                            disabled={isLocating}
+                        >
+                            {guestStrings.locateButton}
+                        </button>
+                        <Link
+                            className="inline-flex min-h-12 items-center rounded-xl bg-slate-900/80 px-4 text-sm font-semibold text-white shadow backdrop-blur hover:bg-slate-900"
+                            to="/hospital"
+                        >
+                            {guestStrings.hospitalScreenButton}
+                        </Link>
+                    </div>
+
+                    <p className="pointer-events-auto mx-auto mt-2 w-full max-w-[430px] rounded-xl bg-slate-900/80 px-3 py-2 text-xs font-medium text-slate-100 shadow-lg backdrop-blur md:ml-[336px] md:mr-3 md:w-fit md:max-w-[420px]">
+                        {statusMessage}
+                    </p>
+                </header>
+
+                <TrackingStatusBar
+                    visible={mode === "tracking"}
+                    etaMinutes={etaMinutes}
+                    statusMessage={trackingStatusMessage}
+                    isReconnecting={isReconnecting}
+                />
+
+                {mode === "browse" && !selectedFacility ? (
+                    <FacilityFilterPanel
+                        filterType={filterType}
+                        searchText={searchText}
+                        radius={radius}
+                        isLoading={isFacilityLoading}
+                        resultCount={facilities.length}
+                        errorMessage={null}
+                        onFilterTypeChange={setFilterType}
+                        onSearchTextChange={setSearchText}
+                        onRadiusChange={setRadius}
+                    >
+                        <FacilityList
+                            facilities={facilities}
+                            isLoading={isFacilityLoading}
+                            errorMessage={listFeedbackMessage}
+                            onSelectFacility={setSelectedFacility}
+                        />
+                    </FacilityFilterPanel>
+                ) : null}
+
+                {mode === "browse" && Boolean(selectedFacility) ? (
+                    <FacilityDetailSheet
+                        facility={selectedFacility}
+                        hasUserLocation={Boolean(currentPosition)}
+                        onClose={() => setSelectedFacility(null)}
+                        onDirectionsBlocked={() => setLocationError(guestStrings.directionsNeedGps)}
+                    />
+                ) : null}
+
+                {locationError ? (
+                    <div className="pointer-events-auto absolute left-1/2 top-[max(5.75rem,calc(env(safe-area-inset-top)+5rem))] z-[710] w-[calc(100%-1rem)] max-w-[430px] -translate-x-1/2 rounded-2xl border border-red-200 bg-red-50/95 p-3 text-sm shadow-lg md:left-[336px] md:w-[min(430px,calc(100%-21rem))] md:max-w-none md:translate-x-0 lg:left-4 lg:top-[5.5rem] lg:w-[min(430px,calc(100%-2rem))]">
+                        <p className="font-semibold text-red-700">{locationError}</p>
+                        <button
+                            className="mt-2 min-h-11 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-500"
+                            type="button"
+                            onClick={acquireCurrentLocation}
+                        >
+                            {guestStrings.retry}
+                        </button>
+                    </div>
+                ) : null}
+            </section>
+
+            <div className="pointer-events-none fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-[1000] -translate-x-1/2 lg:bottom-8 lg:left-[calc(380px+(100vw-380px)/2)]">
+                <SosButton onClick={handleSosClick} disabled={isLocating || isSendingSos} />
+            </div>
+
+            <SosConfirmationModal
+                open={isSosModalOpen}
+                position={sosPreviewPosition}
+                phone={victimPhone}
+                phoneError={phoneError}
+                isSubmitting={isSendingSos}
+                submitError={sosSubmitError}
+                onPhoneChange={setVictimPhone}
+                onCancel={() => {
+                    setIsSosModalOpen(false);
+                    setSosSubmitError(null);
+                    setPhoneError(null);
+                }}
+                onConfirm={handleConfirmSos}
+            />
+
+            {isLocating ? (
+                <div className="pointer-events-none absolute inset-0 z-[720] grid place-items-center bg-slate-900/20">
+                    <div className="rounded-2xl bg-white/95 px-4 py-3 text-sm font-semibold text-slate-700 shadow-xl">
+                        {guestStrings.locationRequesting}
+                    </div>
+                </div>
+            ) : null}
+
+            {showSosSuccess ? (
+                <div className="pointer-events-none absolute inset-0 z-[735] grid place-items-center bg-slate-900/35 p-4">
+                    <article className="w-full max-w-[430px] rounded-3xl bg-white p-5 text-center shadow-2xl">
+                        <h2 className="text-xl font-bold text-emerald-700">{guestStrings.sosSuccessTitle}</h2>
+                        <p className="mt-2 text-sm text-slate-700">{guestStrings.sosSuccessBody}</p>
+                        {assignedHospital ? (
+                            <div className="mt-3 rounded-xl bg-slate-50 p-3 text-left text-sm text-slate-700">
+                                <p className="font-semibold text-slate-900">
+                                    {guestStrings.assignedHospitalLabel}: {assignedHospital.name}
+                                </p>
+                                <p className="mt-1">
+                                    {guestStrings.assignedHospitalHotline}:{" "}
+                                    {assignedHospital.hotline || guestStrings.detailPhoneFallback}
+                                </p>
+                            </div>
+                        ) : null}
+                    </article>
+                </div>
+            ) : null}
+
+            {mode === "completed" ? (
+                <div className="absolute inset-0 z-[734] grid place-items-center bg-slate-900/55 p-4">
+                    <article className="w-full max-w-[430px] rounded-3xl bg-white p-6 text-center shadow-2xl">
+                        <h2 className="text-2xl font-bold text-emerald-700">{guestStrings.rescueCompleted}</h2>
+                        <button
+                            className="mt-5 min-h-12 w-full rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800"
+                            type="button"
+                            onClick={clearTrackingState}
+                        >
+                            {guestStrings.returnToMap}
+                        </button>
+                    </article>
+                </div>
+            ) : null}
+        </main>
     );
-  };
-
-  const handleSosClick = () => {
-    if (!currentPosition) {
-      setGeoMessage("Không thể gửi SOS: Xin vui lòng cấp quyền vị trí trước!");
-      requestLocationPermission();
-      setShowPermissionHelp(true);
-      return;
-    }
-    
-    // Giả lập gọi API gửi SOS với toạ độ
-    window.alert(
-      `🚨 ĐÃ GỬI TÍN HIỆU SOS KHẨN CẤP!\n\nTọa độ của bạn:\n📍 Vĩ độ: ${currentPosition[0].toFixed(5)}\n📍 Kinh độ: ${currentPosition[1].toFixed(5)}\n\nĐội cứu hộ đang trên đường tới.`
-    );
-  };
-
-  return (
-    <main className="relative h-dvh w-screen overflow-hidden bg-slate-900">
-      <VietnamMap currentPosition={currentPosition} />
-
-      {/* Top Glass App Bar */}
-      <div className="absolute left-0 right-0 top-0 z-[600] bg-gradient-to-b from-slate-900/60 to-transparent pt-[max(1rem,env(safe-area-inset-top))] pb-8">
-        <div className="mx-auto flex w-full max-w-lg items-center justify-between gap-3 px-4">
-          <div className="flex flex-1 items-center gap-2 rounded-2xl border border-white/20 bg-white/10 p-1.5 shadow-lg backdrop-blur-md">
-            <button
-              className="flex-1 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition-all hover:bg-slate-50 active:scale-95 flex items-center justify-center gap-2"
-              type="button"
-              onClick={requestLocationPermission}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-blue-500">
-                <path fillRule="evenodd" d="M11.986 3H12a2 2 0 012 2v6a2 2 0 01-1.5 1.937V7A2.5 2.5 0 0010 4.5H8.063A2 2 0 0110 3h1.986zM2 7a2 2 0 012-2h4a2 2 0 012 2v7.942l-4.184-4.185a.5.5 0 00-.707 0L2 14.942V7z" clipRule="evenodd" />
-              </svg>
-              Định vị
-            </button>
-            <Link
-              className="flex-1 rounded-xl px-4 py-2.5 text-center text-sm font-semibold text-white transition-colors hover:bg-white/10 flex items-center justify-center gap-2"
-              to="/hospital"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11.25a.75.75 0 00-1.5 0v2.5h-2.5a.75.75 0 000 1.5h2.5v2.5a.75.75 0 001.5 0v-2.5h2.5a.75.75 0 000-1.5h-2.5v-2.5z" clipRule="evenodd" />
-              </svg>
-              Bệnh viện
-            </Link>
-          </div>
-        </div>
-      </div>
-
-      {/* Floating Status Pill */}
-      <div
-        className="pointer-events-none absolute bottom-40 left-0 right-0 z-[650] flex justify-center px-4"
-        aria-live="polite"
-      >
-        <div className="inline-flex animate-[slide-up_0.5s_ease-out] items-center gap-2 rounded-full border border-white/10 bg-slate-900/80 px-4 py-2 text-sm font-medium text-slate-200 shadow-xl backdrop-blur-md">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75"></span>
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500"></span>
-          </span>
-          {geoMessage}
-        </div>
-      </div>
-
-      {/* Centered SOS Button */}
-      <div className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center">
-        <div className="mt-12">
-          <SosButton onClick={handleSosClick} />
-        </div>
-      </div>
-
-      <LocationPermissionPopup open={showPermissionHelp} onClose={() => setShowPermissionHelp(false)} />
-    </main>
-  );
 }
