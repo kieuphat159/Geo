@@ -1,8 +1,49 @@
 import { Link } from "react-router-dom";
 import EmergencyTable from "../components/EmergencyTable";
-import { mockEmergencies } from "../data/mockEmergencies";
+import { useEffect, useState } from "react";
+import * as adminApi from "../services/adminApi";
+import FacilityAdminModal from "../components/FacilityAdminModal";
 
 export default function HospitalDashboardPage() {
+  const [emergencies, setEmergencies] = useState<any[]>([]);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [showAlert, setShowAlert] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const controller = new AbortController();
+    let prevWaitingCount = 0;
+
+    async function pollOnce() {
+      try {
+        const rows = await adminApi.fetchEmergencies(controller.signal);
+        if (!mounted) return;
+        const waiting = (rows || []).filter((r: any) => r.status === "WAITING");
+        if (waiting.length > prevWaitingCount) {
+          setShowAlert(true);
+          window.setTimeout(() => setShowAlert(false), 5000);
+        }
+
+        prevWaitingCount = waiting.length;
+        setEmergencies(rows || []);
+        setPollError(null);
+      } catch (e) {
+        if ((e as { name?: string }).name === "AbortError") return;
+        setPollError("Không thể tải danh sách ca cấp cứu");
+      }
+    }
+
+    pollOnce();
+    const timer = window.setInterval(pollOnce, 8000);
+
+    return () => {
+      mounted = false;
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, []);
+
   return (
     <main className="min-h-dvh bg-slate-50 p-4 font-sans text-slate-900 sm:p-6 lg:p-8">
       <div className="mx-auto max-w-[1600px] space-y-6">
@@ -34,9 +75,15 @@ export default function HospitalDashboardPage() {
             <div className="border-b border-slate-100 bg-white px-6 py-5">
               <h2 className="text-lg font-bold tracking-tight text-slate-900">Danh sách ca cấp cứu</h2>
               <p className="mt-1 text-sm text-slate-500">Các yêu cầu đang chờ phản hồi từ trung tâm</p>
+              <div className="mt-3 flex items-center gap-2">
+                <button className="rounded-lg bg-emerald-600 px-3 py-2 text-white" onClick={() => setAdminOpen(true)}>
+                  Quản lý cơ sở
+                </button>
+              </div>
             </div>
             <div className="bg-slate-50/30 p-6 flex-1">
-              <EmergencyTable rows={mockEmergencies} />
+              {pollError ? <div className="text-red-600">{pollError}</div> : null}
+              <EmergencyTable rows={emergencies} />
             </div>
           </section>
 
@@ -68,6 +115,13 @@ export default function HospitalDashboardPage() {
           </section>
         </div>
       </div>
+      {showAlert ? (
+        <div className="fixed right-6 top-6 z-[950] rounded-xl bg-red-600 px-4 py-3 text-white shadow-lg">
+          <strong>Có ca cấp cứu mới đang chờ xử lý</strong>
+        </div>
+      ) : null}
+
+      <FacilityAdminModal open={adminOpen} onClose={() => setAdminOpen(false)} />
     </main>
   );
 }
