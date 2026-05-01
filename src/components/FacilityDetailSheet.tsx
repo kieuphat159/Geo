@@ -63,8 +63,8 @@ export default function FacilityDetailSheet({
 
     const containerClassName =
         variant === "panel"
-            ? "pointer-events-auto rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm"
-            : "pointer-events-auto absolute bottom-[7.25rem] left-1/2 z-[660] w-[calc(100%-1rem)] max-w-[430px] -translate-x-1/2 rounded-3xl border border-slate-200/80 bg-white/95 p-4 shadow-xl shadow-slate-900/20 backdrop-blur md:bottom-0 md:left-0 md:top-0 md:h-dvh md:w-[320px] md:max-w-none md:translate-x-0 md:rounded-none md:rounded-r-3xl md:border-r md:border-slate-200/70 md:bg-white/80 md:pt-[max(1rem,env(safe-area-inset-top))] md:pb-[max(1rem,env(safe-area-inset-bottom))] md:backdrop-blur-xl md:overflow-y-auto lg:hidden";
+            ? "pointer-events-auto rounded-2xl border border-violet-100 bg-white p-4 shadow-sm"
+            : "pointer-events-auto absolute bottom-[7.25rem] left-1/2 z-[660] w-[calc(100%-1rem)] max-w-[430px] -translate-x-1/2 rounded-3xl border border-violet-100 bg-white/95 p-4 shadow-xl shadow-violet-950/20 backdrop-blur md:bottom-0 md:left-0 md:top-0 md:h-dvh md:w-[320px] md:max-w-none md:translate-x-0 md:rounded-none md:rounded-r-3xl md:border-r md:border-violet-100 md:bg-white/80 md:pt-[max(1rem,env(safe-area-inset-top))] md:pb-[max(1rem,env(safe-area-inset-bottom))] md:backdrop-blur-xl md:overflow-y-auto lg:hidden";
 
     return (
         <section className={containerClassName} aria-label={guestStrings.detailTitle}>
@@ -74,7 +74,7 @@ export default function FacilityDetailSheet({
                     <p className="mt-0.5 text-xs font-medium text-slate-600">{guestStrings.detailTitle}</p>
                 </div>
                 <button
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-violet-50 text-violet-800 hover:bg-violet-100"
                     type="button"
                     onClick={onClose}
                     aria-label={guestStrings.closeFacilityDetailAria}
@@ -93,7 +93,7 @@ export default function FacilityDetailSheet({
             </dl>
 
             <button
-                className="mt-4 min-h-12 w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="mt-4 min-h-12 w-full rounded-xl bg-violet-700 px-4 py-3 text-sm font-semibold text-white shadow hover:bg-violet-600 disabled:cursor-not-allowed disabled:bg-violet-200"
                 type="button"
                 disabled={!hasUserLocation}
                 onClick={openGoogleDirections}

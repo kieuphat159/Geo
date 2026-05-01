@@ -2,6 +2,9 @@ import type { EmergencyCase } from "../types/emergency";
 
 interface EmergencyTableProps {
   rows: EmergencyCase[];
+  onDispatch?: (emergencyId: string) => void;
+  onArrived?: (emergencyId: string) => void;
+  onComplete?: (emergencyId: string) => void;
 }
 
 const priorityClassMap: Record<EmergencyCase["priority"], string> = {
@@ -20,9 +23,11 @@ const statusTextMap: Record<EmergencyCase["status"], string> = {
   WAITING: "Đang chờ",
   ASSIGNED: "Đã nhận",
   ON_THE_WAY: "Đang di chuyển",
+  ARRIVED: "Đã đến nơi",
+  COMPLETED: "Hoàn thành",
 };
 
-export default function EmergencyTable({ rows }: EmergencyTableProps) {
+export default function EmergencyTable({ rows, onDispatch, onArrived, onComplete }: EmergencyTableProps) {
   if (rows.length === 0) {
     return (
       <div className="flex min-h-[200px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-8 text-center text-sm text-slate-500">
@@ -61,6 +66,16 @@ export default function EmergencyTable({ rows }: EmergencyTableProps) {
                 <dt className="text-slate-500">Khoảng cách:</dt>{" "}
                 <dd className="font-medium text-slate-900">{row.distanceKm.toFixed(1)} km</dd>
               </div>
+              {row.medical_profile?.blood_type || row.medical_profile?.allergies ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-2">
+                  {row.medical_profile?.blood_type ? (
+                    <p className="text-xs font-bold text-red-700">NHOM MAU: {row.medical_profile.blood_type}</p>
+                  ) : null}
+                  {row.medical_profile?.allergies ? (
+                    <p className="mt-1 text-xs font-bold text-red-700">DI UNG: {row.medical_profile.allergies}</p>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="flex justify-between">
                 <dt className="text-slate-500">Trạng thái:</dt> 
                 <dd className="font-medium text-slate-900">{statusTextMap[row.status]}</dd>
@@ -70,11 +85,33 @@ export default function EmergencyTable({ rows }: EmergencyTableProps) {
             <button
               className="mt-5 w-full flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md active:translate-y-0"
               type="button"
+                  onClick={() => {
+                    if (!onDispatch && !onArrived && !onComplete) return;
+                    if (row.status === "WAITING" || row.status === "ASSIGNED") {
+                      onDispatch?.(row.id);
+                      return;
+                    }
+                    if (row.status === "ON_THE_WAY") {
+                      onArrived?.(row.id);
+                      return;
+                    }
+                    if (row.status === "ARRIVED") {
+                      onComplete?.(row.id);
+                      return;
+                    }
+                    // COMPLETED: no action
+                  }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
               </svg>
-              Nhận ca
+              {row.status === "WAITING" || row.status === "ASSIGNED"
+                ? "Điều động xe"
+                : row.status === "ON_THE_WAY"
+                  ? "Đã đến nơi"
+                  : row.status === "ARRIVED"
+                    ? "Hoàn thành ca"
+                  : "Hoàn thành"}
             </button>
           </article>
         ))}
@@ -108,16 +145,70 @@ export default function EmergencyTable({ rows }: EmergencyTableProps) {
                   <div className="mt-1 font-mono text-xs text-slate-400">
                     {row.latitude.toFixed(5)}, {row.longitude.toFixed(5)}
                   </div>
+                  {row.medical_profile?.blood_type || row.medical_profile?.allergies ? (
+                    <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2">
+                      {row.medical_profile?.blood_type ? (
+                        <p className="text-xs font-bold text-red-700">NHOM MAU: {row.medical_profile.blood_type}</p>
+                      ) : null}
+                      {row.medical_profile?.allergies ? (
+                        <p className="mt-1 text-xs font-bold text-red-700">DI UNG: {row.medical_profile.allergies}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </td>
                 <td className="px-5 py-4 whitespace-nowrap text-slate-600 font-medium">{row.distanceKm.toFixed(1)} km</td>
                 <td className="px-5 py-4 whitespace-nowrap text-slate-600">{statusTextMap[row.status]}</td>
                 <td className="px-5 py-4 text-right">
-                  <button className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-900 ring-1 ring-inset ring-slate-200 shadow-sm transition-all hover:bg-slate-50 hover:ring-slate-300" type="button">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 text-indigo-600">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-                    </svg>
-                    Nhận ca
-                  </button>
+                  <div className="inline-flex items-center gap-2">
+                    {(row.status === "WAITING" || row.status === "ASSIGNED") && onDispatch ? (
+                      <button
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                        type="button"
+                        onClick={() => onDispatch(row.id)}
+                      >
+                        Điều động xe
+                      </button>
+                    ) : null}
+
+                    {row.status === "ON_THE_WAY" && onArrived && onComplete ? (
+                      <>
+                        <button
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-500"
+                          type="button"
+                          onClick={() => onArrived(row.id)}
+                        >
+                          Đã đến nơi
+                        </button>
+                        <button
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-600"
+                          type="button"
+                          onClick={() => onComplete(row.id)}
+                        >
+                          Hoàn thành ca
+                        </button>
+                      </>
+                    ) : null}
+
+                    {row.status === "ARRIVED" && onComplete ? (
+                      <button
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-600"
+                        type="button"
+                        onClick={() => onComplete(row.id)}
+                      >
+                        Hoàn thành ca
+                      </button>
+                    ) : null}
+
+                    {row.status === "COMPLETED" ? (
+                      <button
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-500 ring-1 ring-inset ring-slate-200 shadow-sm transition-all"
+                        type="button"
+                        disabled
+                      >
+                        Hoàn thành
+                      </button>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ))}

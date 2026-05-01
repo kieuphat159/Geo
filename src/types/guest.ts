@@ -28,7 +28,8 @@ export interface FacilityQueryParams {
 }
 
 export interface SosRequestPayload {
-    victim_phone: string;
+    victim_phone?: string;
+    guest_uuid?: string;
     lat: number;
     lng: number;
 }
@@ -51,6 +52,10 @@ export interface SosResponse {
     assigned_hospital?: AssignedHospital;
     route_path?: GeoJsonLineString | [number, number][];
     eta_minutes?: number;
+    tracking_token?: string;
+    status?: string;
+    ambulance_position?: { lat: number; lng: number } | null;
+    patient_position?: { lat: number; lng: number } | null;
 }
 
 export interface TrackingSocketEvent {

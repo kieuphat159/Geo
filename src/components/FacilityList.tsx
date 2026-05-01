@@ -6,6 +6,7 @@ interface FacilityListProps {
     facilities: Facility[];
     isLoading: boolean;
     errorMessage: string | null;
+    emptyMessage?: string;
     onSelectFacility: (facility: Facility) => void;
 }
 
@@ -23,20 +24,26 @@ function getTypeLabel(type: Facility["type"]): string {
 
 function getTypeBadgeClass(type: Facility["type"]): string {
     if (type === 1) {
-        return "bg-red-100 text-red-700";
+        return "bg-violet-700 text-violet-50";
     }
 
     if (type === 2) {
-        return "bg-amber-100 text-amber-700";
+        return "bg-violet-100 text-violet-800";
     }
 
-    return "bg-emerald-100 text-emerald-700";
+    return "bg-violet-50 text-violet-700";
 }
 
-export default function FacilityList({ facilities, isLoading, errorMessage, onSelectFacility }: FacilityListProps) {
+export default function FacilityList({
+    facilities,
+    isLoading,
+    errorMessage,
+    emptyMessage,
+    onSelectFacility,
+}: FacilityListProps) {
     if (isLoading) {
         return (
-            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600">
+            <div className="rounded-2xl border border-violet-100 bg-white px-4 py-3 text-sm font-medium text-violet-900/80">
                 {guestStrings.loadingFacilities}
             </div>
         );
@@ -52,25 +59,27 @@ export default function FacilityList({ facilities, isLoading, errorMessage, onSe
 
     if (facilities.length === 0) {
         return (
-            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600">
-                {guestStrings.noFacilities}
+            <div className="rounded-2xl border border-violet-100 bg-white px-4 py-3 text-sm font-medium text-violet-900/80">
+                {emptyMessage || guestStrings.noFacilities}
             </div>
         );
     }
 
     return (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
             {facilities.map((facility) => (
                 <button
                     key={facility.id}
-                    className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-slate-300 hover:shadow"
+                    className="w-full rounded-2xl border border-violet-100 bg-white p-3 text-left shadow-sm transition hover:border-violet-300 hover:shadow"
                     type="button"
                     onClick={() => onSelectFacility(facility)}
                 >
                     <div className="flex items-start justify-between gap-3">
-                        <h3 className="text-sm font-bold text-slate-900">{facility.name}</h3>
+                        <h3 className="facility-name-clamp text-sm font-bold text-slate-900">
+                            {facility.name}
+                        </h3>
                         <span
-                            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getTypeBadgeClass(
+                            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${getTypeBadgeClass(
                                 facility.type,
                             )}`}
                         >
@@ -78,12 +87,14 @@ export default function FacilityList({ facilities, isLoading, errorMessage, onSe
                         </span>
                     </div>
 
-                    <div className="mt-3 grid gap-1 text-sm text-slate-600">
-                        <p>
+                    <div className="mt-2 grid gap-1 text-sm text-slate-600">
+                        <p className="flex items-center gap-1.5">
+                            <span aria-hidden="true">📍</span>
                             <span className="font-semibold text-slate-700">{guestStrings.detailLabelDistance}: </span>
                             {formatDistanceLabel(facility.distanceMeters) || guestStrings.detailDistanceFallback}
                         </p>
-                        <p>
+                        <p className="flex items-center gap-1.5">
+                            <span aria-hidden="true">☎</span>
                             <span className="font-semibold text-slate-700">{guestStrings.detailLabelHotline}: </span>
                             {facility.phone || guestStrings.detailPhoneFallback}
                         </p>

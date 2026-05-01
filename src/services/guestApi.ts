@@ -16,6 +16,7 @@ import { haversineDistanceMeters } from "../utils/distance";
 // Placeholder contracts expected from backend.
 const FACILITIES_ENDPOINT = "/api/facilities";
 const SOS_ENDPOINT = "/api/emergency/sos";
+const GUEST_UUID_STORAGE_KEY = "geo:guest-uuid";
 
 const MOCK_FACILITIES_GEOJSON = {
     type: "FeatureCollection",
@@ -126,6 +127,34 @@ function resolveApiUrl(pathname: string): URL {
     return new URL(pathname, configuredBaseUrl || fallbackBaseUrl);
 }
 
+function createGuestUuid(): string {
+    if (typeof window !== "undefined" && window.crypto?.randomUUID) {
+        return window.crypto.randomUUID();
+    }
+
+    const template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx";
+    return template.replace(/[xy]/g, (char) => {
+        const random = Math.floor(Math.random() * 16);
+        const value = char === "x" ? random : (random & 0x3) | 0x8;
+        return value.toString(16);
+    });
+}
+
+function getOrCreateGuestUuid(): string {
+    if (typeof window === "undefined") {
+        return createGuestUuid();
+    }
+
+    const existing = localStorage.getItem(GUEST_UUID_STORAGE_KEY);
+    if (existing && existing.trim()) {
+        return existing;
+    }
+
+    const generated = createGuestUuid();
+    localStorage.setItem(GUEST_UUID_STORAGE_KEY, generated);
+    return generated;
+}
+
 function toNumber(value: unknown): number | undefined {
     if (typeof value === "number" && Number.isFinite(value)) {
         return value;
@@ -142,9 +171,58 @@ function toNumber(value: unknown): number | undefined {
 }
 
 function toFacilityType(value: unknown): FacilityType | undefined {
+    if (typeof value === "number") {
+        if (value === 1 || value === 2 || value === 3) {
+            return value;
+        }
+        return undefined;
+    }
+
     const parsed = toNumber(value);
     if (parsed === 1 || parsed === 2 || parsed === 3) {
         return parsed;
+    }
+
+    if (typeof value === "string") {
+        const normalized = value
+            .trim()
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "");
+
+        if (normalized.includes("hospital") || normalized.includes("benh vien") || normalized.startsWith("bv ")) {
+            return 1;
+        }
+
+        if (normalized.includes("clinic") || normalized.includes("phong kham")) {
+            return 2;
+        }
+
+        if (normalized.includes("pharmacy") || normalized.includes("nha thuoc")) {
+            return 3;
+        }
+    }
+
+    return undefined;
+}
+
+function inferFacilityTypeFromName(name: string): FacilityType | undefined {
+    const normalized = name
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+
+    if (normalized.includes("benh vien") || normalized.includes("bv ")) {
+        return 1;
+    }
+
+    if (normalized.includes("phong kham")) {
+        return 2;
+    }
+
+    if (normalized.includes("nha thuoc")) {
+        return 3;
     }
 
     return undefined;
@@ -178,6 +256,21 @@ function parseAssignedHospital(input: unknown): AssignedHospital | undefined {
         lat,
         lng,
     };
+}
+
+function parseLatLngObject(input: unknown): { lat: number; lng: number } | undefined {
+    if (!input || typeof input !== "object") {
+        return undefined;
+    }
+
+    const row = input as { lat?: unknown; lng?: unknown };
+    const lat = toNumber(row.lat);
+    const lng = toNumber(row.lng);
+    if (lat === undefined || lng === undefined) {
+        return undefined;
+    }
+
+    return { lat, lng };
 }
 
 function normalizeRoutePath(rawRoutePath: unknown): GeoJsonLineString | undefined {
@@ -252,6 +345,7 @@ function parseFacility(input: unknown, userLocation: [number, number]): Facility
 
     const row = input as Record<string, unknown>;
     const geometry = row.geometry as Record<string, unknown> | undefined;
+    const location = row.location as Record<string, unknown> | undefined;
     const properties = row.properties as Record<string, unknown> | undefined;
 
     let lat = toNumber(row.lat ?? row.latitude ?? properties?.lat ?? properties?.latitude);
@@ -262,19 +356,15 @@ function parseFacility(input: unknown, userLocation: [number, number]): Facility
         lat = toNumber(geometry.coordinates[1]) ?? lat;
     }
 
+    // Backend /api/facilities often returns GeoJSON in `location` instead of `geometry`.
+    if (location && location.type === "Point" && Array.isArray(location.coordinates)) {
+        lng = toNumber(location.coordinates[0]) ?? lng;
+        lat = toNumber(location.coordinates[1]) ?? lat;
+    }
+
     if (lat === undefined || lng === undefined) {
         return null;
     }
-
-    const type =
-        toFacilityType(
-            row.Facility_Type ??
-                row.facility_type ??
-                row.type ??
-                properties?.Facility_Type ??
-                properties?.facility_type ??
-                properties?.type,
-        ) ?? 3;
 
     const name =
         (row.name as string | undefined) ||
@@ -282,6 +372,24 @@ function parseFacility(input: unknown, userLocation: [number, number]): Facility
         (properties?.name as string | undefined) ||
         (properties?.facility_name as string | undefined) ||
         "Unknown facility";
+
+    let type =
+        toFacilityType(
+            row.Facility_Type ??
+                row.facility_type ??
+                row.facilityType ??
+                row.type ??
+                properties?.Facility_Type ??
+                properties?.facility_type ??
+                properties?.type,
+        ) ?? 3;
+
+    // Defensive fix: if backend's facility_type is inconsistent with the facility name,
+    // infer the correct type from the name to keep UI filters consistent.
+    const inferred = inferFacilityTypeFromName(name);
+    if (inferred && inferred !== type) {
+        type = inferred;
+    }
 
     const address =
         (row.address as string | undefined) || (properties?.address as string | undefined) || "Unknown address";
@@ -379,18 +487,40 @@ export async function fetchFacilities(params: FacilityQueryParams, signal?: Abor
 
 export async function sendEmergencySos(payload: SosRequestPayload): Promise<SosResponse> {
     const url = resolveApiUrl(SOS_ENDPOINT);
+    const sessionRaw = localStorage.getItem("geo:auth-session");
+    let token: string | undefined;
+    if (sessionRaw) {
+        try {
+            token = (JSON.parse(sessionRaw) as { token?: string }).token;
+        } catch {
+            token = undefined;
+        }
+    }
 
     const response = await fetch(url.toString(), {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+            ...payload,
+            guest_uuid: payload.guest_uuid || getOrCreateGuestUuid(),
+        }),
     });
 
     if (!response.ok) {
-        throw new Error(`SOS request failed with status ${response.status}.`);
+        let message = `SOS request failed with status ${response.status}.`;
+        try {
+            const errorPayload = (await response.json()) as { message?: unknown };
+            if (typeof errorPayload?.message === "string" && errorPayload.message.trim()) {
+                message = errorPayload.message;
+            }
+        } catch {
+            // ignore parse errors, keep default message
+        }
+        throw new Error(message);
     }
 
     const data = (await response.json()) as Record<string, unknown>;
@@ -405,5 +535,68 @@ export async function sendEmergencySos(payload: SosRequestPayload): Promise<SosR
         assigned_hospital: parseAssignedHospital(data.assigned_hospital ?? data.hospital),
         route_path: normalizeRoutePath(data.route_path ?? data.routePath),
         eta_minutes: toNumber(data.eta_minutes ?? data.etaMinutes),
+        status: typeof data.status === "string" ? data.status : undefined,
+        ambulance_position: parseLatLngObject(data.ambulance_position),
+        patient_position: parseLatLngObject(data.patient_position),
+        tracking_token:
+            (data.tracking_token as string | undefined) ??
+            (data.trackingToken as string | undefined) ??
+            (data.trackingTokenId as string | undefined),
+    };
+}
+
+export async function getActiveEmergencySos(signal?: AbortSignal): Promise<SosResponse | null> {
+    const url = resolveApiUrl("/api/emergency/active");
+    const sessionRaw = localStorage.getItem("geo:auth-session");
+    const guestUuid = getOrCreateGuestUuid();
+    let token: string | undefined;
+    if (sessionRaw) {
+        try {
+            token = (JSON.parse(sessionRaw) as { token?: string }).token;
+        } catch {
+            token = undefined;
+        }
+    }
+
+    if (!token) {
+        url.searchParams.set("guest_uuid", guestUuid);
+    }
+
+    const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+            Accept: "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        signal,
+    });
+
+    if (!response.ok) {
+        return null;
+    }
+
+    const payload = (await response.json()) as { data?: Record<string, unknown> | null };
+    if (!payload?.data) {
+        return null;
+    }
+
+    const data = payload.data;
+    const requestId = toNumber(data.request_id ?? data.requestId);
+    if (requestId === undefined) {
+        return null;
+    }
+
+    return {
+        request_id: requestId,
+        assigned_hospital: parseAssignedHospital(data.assigned_hospital ?? data.hospital),
+        route_path: normalizeRoutePath(data.route_path ?? data.routePath),
+        eta_minutes: toNumber(data.eta_minutes ?? data.etaMinutes),
+        status: typeof data.status === "string" ? data.status : undefined,
+        tracking_token:
+            (data.tracking_token as string | undefined) ??
+            (data.trackingToken as string | undefined) ??
+            (data.trackingTokenId as string | undefined),
+        ambulance_position: parseLatLngObject(data.ambulance_position),
+        patient_position: parseLatLngObject(data.patient_position),
     };
 }
