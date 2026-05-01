@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
+import type { Map as LeafletMap, Marker as LeafletMarker } from "leaflet";
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from "react-leaflet";
 import type { AssignedHospital, Facility } from "../types/guest";
 import { ambulanceIcon, getFacilityIcon, hospitalIcon, sosPulseIcon, userLocationIcon } from "../utils/mapIcons";
+import { guestStrings } from "../constants/guestStrings";
 
 interface MapViewportControllerProps {
     mode: "browse" | "tracking" | "completed";
@@ -95,7 +97,10 @@ interface VietnamMapProps {
     mode: "browse" | "tracking" | "completed";
     currentPosition: [number, number] | null;
     facilities: Facility[];
+    selectedFacilityId: string | number | null;
     onFacilitySelect: (facility: Facility) => void;
+    onOpenDirectionsForFacility: (facility: Facility) => void;
+    onSosHereForFacility: (facility: Facility) => void;
     sosPosition: [number, number] | null;
     assignedHospital: AssignedHospital | null;
     ambulancePosition: [number, number] | null;
@@ -108,7 +113,10 @@ export default function VietnamMap({
     mode,
     currentPosition,
     facilities,
+    selectedFacilityId,
     onFacilitySelect,
+    onOpenDirectionsForFacility,
+    onSosHereForFacility,
     sosPosition,
     assignedHospital,
     ambulancePosition,
@@ -118,9 +126,33 @@ export default function VietnamMap({
     const hospitalPosition: [number, number] | null = assignedHospital
         ? [assignedHospital.lat, assignedHospital.lng]
         : null;
+    const markerRefs = useRef<Record<string, LeafletMarker | null>>({});
+    const mapRef = useRef<LeafletMap | null>(null);
+
+    useEffect(() => {
+        if (selectedFacilityId === null || !mapRef.current) {
+            return;
+        }
+
+        const marker = markerRefs.current[String(selectedFacilityId)];
+        const selected = facilities.find((facility) => facility.id === selectedFacilityId);
+        if (!marker || !selected) {
+            return;
+        }
+
+        mapRef.current.flyTo([selected.lat, selected.lng], 16, { duration: 0.9 });
+        window.setTimeout(() => marker.openPopup(), 220);
+    }, [facilities, selectedFacilityId]);
 
     return (
-        <MapContainer className="h-full w-full" center={defaultCenter} zoom={13} scrollWheelZoom zoomControl={false}>
+        <MapContainer
+            ref={mapRef}
+            className="h-full w-full"
+            center={defaultCenter}
+            zoom={13}
+            scrollWheelZoom
+            zoomControl={false}
+        >
             <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -140,14 +172,54 @@ export default function VietnamMap({
                     key={facility.id}
                     position={[facility.lat, facility.lng]}
                     icon={getFacilityIcon(facility.type)}
+                    ref={(instance) => {
+                        markerRefs.current[String(facility.id)] = instance;
+                    }}
                     eventHandlers={{
                         click: () => onFacilitySelect(facility),
                     }}
                 >
                     <Popup>
-                        <div>
-                            <p className="font-semibold">{facility.name}</p>
-                            <p className="text-xs">{facility.address}</p>
+                        <div className="max-w-[240px]">
+                            <p className="font-semibold text-slate-900">{facility.name}</p>
+                            <p className="mt-0.5 text-xs text-slate-600">{facility.address}</p>
+
+                            <div className="mt-2 space-y-1 text-[12px] text-slate-700">
+                                <p>
+                                    <span className="font-semibold">{guestStrings.detailLabelHotline}:</span>{" "}
+                                    {facility.phone || guestStrings.detailPhoneFallback}
+                                </p>
+                                <p>
+                                    <span className="font-semibold">{guestStrings.detailLabelOpeningHours}:</span>{" "}
+                                    {facility.openingHours || guestStrings.detailOpeningHoursFallback}
+                                </p>
+                            </div>
+
+                            <div className="mt-3 flex flex-col gap-2">
+                                <button
+                                    className="min-h-10 rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-violet-600 disabled:cursor-not-allowed disabled:bg-violet-200"
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        onOpenDirectionsForFacility(facility);
+                                    }}
+                                >
+                                    {guestStrings.directionsButton}
+                                </button>
+
+                                <button
+                                    className="min-h-10 rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-red-500"
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        onSosHereForFacility(facility);
+                                    }}
+                                >
+                                    {guestStrings.sosHereButton}
+                                </button>
+                            </div>
                         </div>
                     </Popup>
                 </Marker>
@@ -162,7 +234,7 @@ export default function VietnamMap({
                 <Polyline
                     positions={routePath}
                     pathOptions={{
-                        color: "#2563eb",
+                        color: "#7c3aed",
                         weight: 5,
                         opacity: 0.8,
                     }}
