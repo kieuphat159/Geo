@@ -4,6 +4,7 @@ import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from "react-
 import type { AssignedHospital, Facility } from "../types/guest";
 import { ambulanceIcon, getFacilityIcon, hospitalIcon, sosPulseIcon, userLocationIcon } from "../utils/mapIcons";
 import { guestStrings } from "../constants/guestStrings";
+import { telHrefFromDisplay } from "../utils/phone";
 
 interface MapViewportControllerProps {
     mode: "browse" | "tracking" | "completed";
@@ -128,18 +129,26 @@ export default function VietnamMap({
         : null;
     const markerRefs = useRef<Record<string, LeafletMarker | null>>({});
     const mapRef = useRef<LeafletMap | null>(null);
+    /** Avoid re-flying to the same facility when only `facilities` refetches (e.g. after GPS locate). */
+    const lastSelectionFlyToRef = useRef<string | number | null>(null);
 
     useEffect(() => {
-        if (selectedFacilityId === null || !mapRef.current) {
+        if (selectedFacilityId === null) {
+            lastSelectionFlyToRef.current = null;
+            return;
+        }
+
+        if (lastSelectionFlyToRef.current === selectedFacilityId) {
             return;
         }
 
         const marker = markerRefs.current[String(selectedFacilityId)];
         const selected = facilities.find((facility) => facility.id === selectedFacilityId);
-        if (!marker || !selected) {
+        if (!marker || !selected || !mapRef.current) {
             return;
         }
 
+        lastSelectionFlyToRef.current = selectedFacilityId;
         mapRef.current.flyTo([selected.lat, selected.lng], 16, { duration: 0.9 });
         window.setTimeout(() => marker.openPopup(), 220);
     }, [facilities, selectedFacilityId]);
@@ -167,7 +176,11 @@ export default function VietnamMap({
                 layoutSignature={layoutSignature}
             />
 
-            {facilities.map((facility) => (
+            {facilities.map((facility) => {
+                const popupTel = telHrefFromDisplay(facility.phone);
+                const popupPhoneLabel = facility.phone || guestStrings.detailPhoneFallback;
+
+                return (
                 <Marker
                     key={facility.id}
                     position={[facility.lat, facility.lng]}
@@ -187,7 +200,13 @@ export default function VietnamMap({
                             <div className="mt-2 space-y-1 text-[12px] text-slate-700">
                                 <p>
                                     <span className="font-semibold">{guestStrings.detailLabelHotline}:</span>{" "}
-                                    {facility.phone || guestStrings.detailPhoneFallback}
+                                    {popupTel ? (
+                                        <a className="font-bold text-violet-900 underline" href={popupTel}>
+                                            {popupPhoneLabel}
+                                        </a>
+                                    ) : (
+                                        popupPhoneLabel
+                                    )}
                                 </p>
                                 <p>
                                     <span className="font-semibold">{guestStrings.detailLabelOpeningHours}:</span>{" "}
@@ -223,7 +242,8 @@ export default function VietnamMap({
                         </div>
                     </Popup>
                 </Marker>
-            ))}
+            );
+            })}
 
             {currentPosition ? <Marker position={currentPosition} icon={userLocationIcon} /> : null}
             {sosPosition ? <Marker position={sosPosition} icon={sosPulseIcon} /> : null}

@@ -17,6 +17,8 @@ export interface Facility {
     lat: number;
     lng: number;
     distanceMeters?: number;
+    /** Khi lấy từ API quản trị: false = đã soft-delete / tạm ngưng trên bản đồ công khai */
+    is_active?: boolean;
 }
 
 export interface FacilityQueryParams {

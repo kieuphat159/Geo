@@ -12,6 +12,7 @@ export interface EmergencyCase {
   status: EmergencyStatus;
     tracking_token?: string;
     assigned_ambulance_id?: number | null;
+    assigned_ambulance_plate?: string | null;
     done_at?: string | null;
     requester_name?: string | null;
     requester_age?: number | null;

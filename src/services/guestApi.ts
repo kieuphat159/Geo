@@ -11,12 +11,15 @@ import type {
     SosRequestPayload,
     SosResponse,
 } from "../types/guest";
+import { getAuthToken } from "./auth";
 import { haversineDistanceMeters } from "../utils/distance";
 
 // Placeholder contracts expected from backend.
 const FACILITIES_ENDPOINT = "/api/facilities";
 const SOS_ENDPOINT = "/api/emergency/sos";
 const GUEST_UUID_STORAGE_KEY = "geo:guest-uuid";
+/** Alias cho kiểm thử / tài liệu ma trận TC02 (`guest_id` trong localStorage) */
+const GUEST_ID_LEGACY_STORAGE_KEY = "guest_id";
 
 const MOCK_FACILITIES_GEOJSON = {
     type: "FeatureCollection",
@@ -147,12 +150,33 @@ function getOrCreateGuestUuid(): string {
 
     const existing = localStorage.getItem(GUEST_UUID_STORAGE_KEY);
     if (existing && existing.trim()) {
+        try {
+            localStorage.setItem(GUEST_ID_LEGACY_STORAGE_KEY, existing.trim());
+        } catch {
+            /* ignore */
+        }
         return existing;
     }
 
     const generated = createGuestUuid();
     localStorage.setItem(GUEST_UUID_STORAGE_KEY, generated);
+    try {
+        localStorage.setItem(GUEST_ID_LEGACY_STORAGE_KEY, generated);
+    } catch {
+        /* ignore */
+    }
     return generated;
+}
+
+/** Khởi tạo sớm guest uuid (TC02) — gọi từ main.tsx để luôn có khóa trong localStorage trước khi SOS. */
+export function initGuestSession(): string {
+    const id = getOrCreateGuestUuid();
+    try {
+        localStorage.setItem(GUEST_ID_LEGACY_STORAGE_KEY, id);
+    } catch {
+        /* ignore */
+    }
+    return id;
 }
 
 function toNumber(value: unknown): number | undefined {
@@ -487,15 +511,7 @@ export async function fetchFacilities(params: FacilityQueryParams, signal?: Abor
 
 export async function sendEmergencySos(payload: SosRequestPayload): Promise<SosResponse> {
     const url = resolveApiUrl(SOS_ENDPOINT);
-    const sessionRaw = localStorage.getItem("geo:auth-session");
-    let token: string | undefined;
-    if (sessionRaw) {
-        try {
-            token = (JSON.parse(sessionRaw) as { token?: string }).token;
-        } catch {
-            token = undefined;
-        }
-    }
+    const token = getAuthToken() ?? undefined;
 
     const response = await fetch(url.toString(), {
         method: "POST",
@@ -547,16 +563,8 @@ export async function sendEmergencySos(payload: SosRequestPayload): Promise<SosR
 
 export async function getActiveEmergencySos(signal?: AbortSignal): Promise<SosResponse | null> {
     const url = resolveApiUrl("/api/emergency/active");
-    const sessionRaw = localStorage.getItem("geo:auth-session");
     const guestUuid = getOrCreateGuestUuid();
-    let token: string | undefined;
-    if (sessionRaw) {
-        try {
-            token = (JSON.parse(sessionRaw) as { token?: string }).token;
-        } catch {
-            token = undefined;
-        }
-    }
+    const token = getAuthToken() ?? undefined;
 
     if (!token) {
         url.searchParams.set("guest_uuid", guestUuid);

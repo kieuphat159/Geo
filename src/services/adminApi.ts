@@ -51,7 +51,25 @@ function resolveApiUrl(pathname: string): URL {
 async function handleJsonResponse(response: Response) {
     if (!response.ok) {
         const text = await response.text();
-        throw new Error(`Request failed ${response.status}: ${text}`);
+        let message = text;
+        try {
+            const parsed = JSON.parse(text) as { message?: unknown };
+            if (typeof parsed?.message === "string" && parsed.message.trim()) {
+                message = parsed.message.trim();
+            }
+        } catch {
+            /* keep raw text */
+        }
+        throw new Error(message);
+    }
+
+    if (response.status === 204) {
+        return null;
+    }
+
+    const contentLength = response.headers.get("content-length");
+    if (contentLength === "0") {
+        return null;
     }
 
     try {
@@ -170,7 +188,7 @@ export async function deleteFacility(id: string | number) {
 }
 
 export async function fetchFacilitiesAdmin(signal?: AbortSignal) {
-    const url = resolveApiUrl(FACILITIES_ENDPOINT);
+    const url = resolveApiUrl(`${FACILITIES_ENDPOINT}/admin-overview`);
 
     const resp = await authorizedFetch(url.toString(), {
         method: "GET",
@@ -205,6 +223,48 @@ export async function createHospitalAdmin(payload: { email: string; password: st
     return parsed?.data ?? parsed;
 }
 
+export async function updateHospitalAdmin(
+    userId: number,
+    payload: { email?: string; facility_id?: number; password?: string },
+) {
+    const url = resolveApiUrl(`${USERS_ENDPOINT}/${userId}`);
+    const body: Record<string, unknown> = {};
+    if (payload.email !== undefined) body.email = payload.email;
+    if (payload.facility_id !== undefined) body.facility_id = payload.facility_id;
+    if (payload.password !== undefined && payload.password !== "") {
+        body.password = payload.password;
+    }
+    const resp = await authorizedFetch(url.toString(), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+    });
+    const parsed = (await handleJsonResponse(resp)) as any;
+    return parsed?.data ?? parsed;
+}
+
+export async function resetHospitalAdminPassword(userId: number, password?: string) {
+    const url = resolveApiUrl(`${USERS_ENDPOINT}/${userId}/reset-password`);
+    const body = password != null && password !== "" ? { password } : {};
+    const resp = await authorizedFetch(url.toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+    });
+    const parsed = (await handleJsonResponse(resp)) as any;
+    return parsed?.data ?? parsed;
+}
+
+export async function deactivateHospitalAdmin(userId: number) {
+    const url = resolveApiUrl(`${USERS_ENDPOINT}/${userId}`);
+    const resp = await authorizedFetch(url.toString(), {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+    });
+    const parsed = (await handleJsonResponse(resp)) as any;
+    return parsed?.data ?? parsed;
+}
+
 export default {
     fetchEmergencies,
     fetchAmbulances,
@@ -217,4 +277,7 @@ export default {
     fetchFacilitiesAdmin,
     fetchUsers,
     createHospitalAdmin,
+    updateHospitalAdmin,
+    resetHospitalAdminPassword,
+    deactivateHospitalAdmin,
 };

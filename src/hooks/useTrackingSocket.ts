@@ -127,13 +127,21 @@ export function useTrackingSocket({ requestId, enabled, trackingToken, onEvent }
                 setConnectionState("reconnecting");
             });
 
-            socket.on("disconnect", () => {
-                socketRef.current = null;
+            socket.on("disconnect", (reason?: string) => {
                 if (!shouldReconnectRef.current) {
                     setConnectionState("disconnected");
-                } else {
-                    setConnectionState("reconnecting");
+                    return;
                 }
+                if (reason === "io client disconnect") {
+                    setConnectionState("disconnected");
+                    return;
+                }
+                setConnectionState("reconnecting");
+            });
+
+            socket.io.on("reconnect", () => {
+                reconnectAttemptsRef.current = 0;
+                setConnectionState("connected");
             });
         };
 

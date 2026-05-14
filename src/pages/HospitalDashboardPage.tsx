@@ -101,25 +101,15 @@ export default function HospitalDashboardPage() {
   }, [joinRequestRooms]);
 
   const handleDispatch = useCallback(
-    async (emergencyId: string) => {
+    async (emergencyId: string, ambulanceId: number) => {
       try {
-        // Prefer already-loaded ambulances, but if missing/empty, re-fetch to avoid "return early".
-        let ambulanceCandidates = ambulances;
-        if (!ambulanceCandidates || ambulanceCandidates.length === 0) {
-          ambulanceCandidates = await adminApi.fetchAmbulances();
-        }
-
-        const ambulance =
-          ambulanceCandidates.find((a) => a.status === "available") ?? ambulanceCandidates[0];
-        if (!ambulance?.id) {
-          // No available ambulance to dispatch.
+        if (!Number.isFinite(ambulanceId) || ambulanceId <= 0) {
+          setPollError("Chọn xe cứu thương hợp lệ trước khi điều động.");
           return;
         }
 
         const emergencyRequestId = Number(emergencyId);
-        const ambulanceId = Number(ambulance.id);
 
-        // Optimistic UI: reflect dispatch immediately.
         setEmergencies((prev) =>
           prev.map((row) => (Number(row.id) === emergencyRequestId ? { ...row, status: "ASSIGNED" } : row)),
         );
@@ -138,8 +128,28 @@ export default function HospitalDashboardPage() {
         setPollError("Không thể điều động xe cho ca cấp cứu");
       }
     },
-    [ambulances, refreshEmergencies],
+    [refreshEmergencies],
   );
+
+  const reloadAmbulances = useCallback(async () => {
+    try {
+      const rows = await adminApi.fetchAmbulances();
+      setAmbulances(rows || []);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const ambulanceStatusUi = (status: string) => {
+    const s = String(status).toLowerCase();
+    if (s === "available") {
+      return { label: "Sẵn sàng", cls: "border-emerald-200 bg-emerald-50 text-emerald-900" };
+    }
+    if (s === "dispatched") {
+      return { label: "Đang chạy ca", cls: "border-indigo-200 bg-indigo-50 text-indigo-900" };
+    }
+    return { label: "Bảo trì", cls: "border-slate-200 bg-slate-100 text-slate-700" };
+  };
 
   const handleArrived = useCallback(async (emergencyId: string) => {
     try {
@@ -150,12 +160,13 @@ export default function HospitalDashboardPage() {
       );
       await adminApi.updateEmergencyStatus(id, "in_progress");
       await refreshEmergencies();
+      await reloadAmbulances();
       setPollError(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Không thể cập nhật trạng thái đã đến nơi";
       setPollError(msg);
     }
-  }, [refreshEmergencies]);
+  }, [refreshEmergencies, reloadAmbulances]);
 
   const handleComplete = useCallback(async (emergencyId: string) => {
     try {
@@ -166,12 +177,13 @@ export default function HospitalDashboardPage() {
       );
       await adminApi.updateEmergencyStatus(id, "completed");
       await refreshEmergencies();
+      await reloadAmbulances();
       setPollError(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Không thể cập nhật trạng thái hoàn thành";
       setPollError(msg);
     }
-  }, [refreshEmergencies]);
+  }, [refreshEmergencies, reloadAmbulances]);
 
   // Initial load once. After that, dashboard syncs by realtime socket events.
   useEffect(() => {
@@ -223,9 +235,11 @@ export default function HospitalDashboardPage() {
       playBeep();
       window.setTimeout(() => setShowAlert(false), 5000);
       // New SOS created -> refresh list once (no polling).
-      refreshEmergencies().catch(() => {
-        setPollError("Không thể đồng bộ ca cấp cứu mới");
-      });
+      refreshEmergencies()
+        .then(() => reloadAmbulances())
+        .catch(() => {
+          setPollError("Không thể đồng bộ ca cấp cứu mới");
+        });
     });
 
     socket.on("tracking_update", (payload: any) => {
@@ -246,9 +260,11 @@ export default function HospitalDashboardPage() {
 
     socket.on("tracking_ended", () => {
       // Request room closed on backend; reload list to reflect completed/cancelled state.
-      refreshEmergencies().catch(() => {
-        setPollError("Không thể đồng bộ trạng thái ca cấp cứu");
-      });
+      refreshEmergencies()
+        .then(() => reloadAmbulances())
+        .catch(() => {
+          setPollError("Không thể đồng bộ trạng thái ca cấp cứu");
+        });
     });
 
     return () => {
@@ -258,7 +274,7 @@ export default function HospitalDashboardPage() {
       joinedRequestIdsRef.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [joinRequestRooms, playBeep, refreshEmergencies, resolveSocketUrl]);
+  }, [joinRequestRooms, playBeep, refreshEmergencies, reloadAmbulances, resolveSocketUrl]);
 
   return (
     <main className="min-h-dvh bg-slate-50 p-4 font-sans text-slate-900 sm:p-6 lg:p-8">
@@ -275,14 +291,14 @@ export default function HospitalDashboardPage() {
               <p className="mt-0.5 text-sm text-slate-500">Màn hình chờ nhận và điều phối xe cấp cứu</p>
             </div>
           </div>
-          <Link
-            className="inline-flex max-w-max items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-slate-800 active:scale-95"
-            to="/user"
-          >
+            <Link
+              className="inline-flex max-w-max items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-slate-800 active:scale-95"
+              to="/user"
+            >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
               <path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" />
             </svg>
-            Màn hình người dùng
+            ← Về bản đồ khẩn cấp
           </Link>
         </header>
 
@@ -302,6 +318,38 @@ export default function HospitalDashboardPage() {
             </article>
           </section>
 
+          <section className="lg:col-span-2 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold tracking-tight text-slate-900">Đội xe cứu thương</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                    Biển số theo bệnh viện — chọn xe khi điều động ca chờ. Trạng thái cập nhật theo thao tác điều phối.
+                </p>
+              </div>
+            </div>
+            {ambulances.length === 0 ? (
+              <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                Chưa có xe trong hệ thống cho BV này. Chạy seed:{" "}
+                <code className="rounded bg-white px-1 py-0.5 text-xs">npx sequelize-cli db:seed --seed 20260406000003-seed-ambulances.js</code>
+              </p>
+            ) : (
+              <ul className="mt-4 flex flex-wrap gap-2">
+                {ambulances.map((a: any) => {
+                  const ui = ambulanceStatusUi(String(a.status));
+                  return (
+                    <li
+                      key={String(a.id)}
+                      className={`min-w-[140px] rounded-xl border px-3 py-2 shadow-sm ${ui.cls}`}
+                    >
+                      <p className="font-mono text-sm font-bold tracking-tight">{a.plate_number}</p>
+                      <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-wide opacity-90">{ui.label}</p>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
           <section className="flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-100 bg-white px-6 py-5">
               <h2 className="text-lg font-bold tracking-tight text-slate-900">Danh sách ca cấp cứu</h2>
@@ -311,6 +359,7 @@ export default function HospitalDashboardPage() {
               {pollError ? <div className="text-red-600">{pollError}</div> : null}
               <EmergencyTable
                 rows={emergencies}
+                ambulances={ambulances}
                 onDispatch={handleDispatch}
                 onArrived={handleArrived}
                 onComplete={handleComplete}

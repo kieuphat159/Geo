@@ -39,7 +39,7 @@ export default function SosConfirmationModal({
 
     return (
         <div
-            className="absolute inset-0 z-[740] grid place-items-end bg-slate-900/45 p-3 backdrop-blur-sm sm:place-items-center"
+            className="absolute inset-0 z-[1100] grid place-items-end bg-slate-900/45 p-3 backdrop-blur-sm sm:place-items-center"
             role="dialog"
             aria-modal="true"
             aria-labelledby="sos-confirm-title"
