@@ -57,13 +57,38 @@ function parseEtaMinutesFromText(text: string): number | null {
     return Number(match[1]);
 }
 
+test.describe("TC02 Shadow guest (localStorage)", () => {
+    test("TC02 – có guest_id và geo:guest-uuid ngay sau khi load /user (không bấm SOS)", async ({ page, context }) => {
+        await context.clearCookies();
+        await page.goto("/user");
+
+        const keys = await page.evaluate(() => ({
+            guest_id: localStorage.getItem("guest_id"),
+            geoGuestUuid: localStorage.getItem("geo:guest-uuid"),
+        }));
+
+        expect(keys.geoGuestUuid).toBeTruthy();
+        expect(keys.guest_id).toBe(keys.geoGuestUuid);
+        expect(keys.guest_id).toMatch(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        );
+    });
+});
+
 async function expectRoutePathRendered(page: any) {
-    // Leaflet Polyline uses SVG path elements.
+    // Leaflet Polyline uses SVG path elements (route màu tím #7c3aed trong VietnamMap).
     const hasRoute = await page.evaluate(() => {
         const paths = Array.from(document.querySelectorAll("path.leaflet-interactive"));
         return paths.some((p) => {
             const stroke = (p.getAttribute("stroke") || "").toLowerCase();
-            return stroke.includes("2563eb") || stroke.includes("37, 99, 235") || stroke.includes("rgb(37, 99, 235)");
+            return (
+                stroke.includes("2563eb") ||
+                stroke.includes("37, 99, 235") ||
+                stroke.includes("rgb(37, 99, 235)") ||
+                stroke.includes("7c3aed") ||
+                stroke.includes("124, 58, 237") ||
+                stroke.includes("rgb(124, 58, 237)")
+            );
         });
     });
 
@@ -88,7 +113,7 @@ test.describe("TC04–TC07 SOS (Guest)", () => {
 
         const [sosResponse] = await Promise.all([
             page.waitForResponse("**/api/emergency/sos"),
-            page.getByRole("button", { name: "Confirm & Send SOS" }).click(),
+            page.getByRole("button", { name: /xác nhận.*gửi sos|confirm.*send sos/i }).click(),
         ]);
 
         expect(sosResponse.status()).toBe(201);
@@ -135,7 +160,7 @@ test.describe("TC04–TC07 SOS (Guest)", () => {
 
         const [sosResponse] = await Promise.all([
             page.waitForResponse("**/api/emergency/sos"),
-            page.getByRole("button", { name: "Confirm & Send SOS" }).click(),
+            page.getByRole("button", { name: /xác nhận.*gửi sos|confirm.*send sos/i }).click(),
         ]);
 
         expect(sosResponse.status()).toBe(400);
@@ -157,7 +182,7 @@ test.describe("TC04–TC07 SOS (Guest)", () => {
 
         const [sosResponse] = await Promise.all([
             page.waitForResponse("**/api/emergency/sos"),
-            page.getByRole("button", { name: "Confirm & Send SOS" }).click(),
+            page.getByRole("button", { name: /xác nhận.*gửi sos|confirm.*send sos/i }).click(),
         ]);
 
         expect(sosResponse.status()).toBe(201);

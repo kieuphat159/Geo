@@ -5,7 +5,7 @@ import RegisterPage from "../pages/RegisterPage";
 import SuperAdminDashboardPage from "../pages/SuperAdminDashboardPage";
 import UserPage from "../pages/UserPage";
 import { Navigate } from "react-router-dom";
-import { getStoredSession } from "../services/auth";
+import { getStoredSession, homePathForRoleId, normalizeKnownRoleId } from "../services/auth";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
     const session = getStoredSession();
@@ -60,11 +60,11 @@ export const routes = [
         path: "/admin",
         element: (
             <RequireAuth>
-                {Number(getStoredSession()?.user?.role_id) === 2 ? (
-                    <HospitalDashboardPage />
-                ) : (
-                    <Navigate to="/super-admin" replace />
-                )}
+                {(() => {
+                    const roleId = normalizeKnownRoleId(getStoredSession());
+                    if (roleId === 2) return <HospitalDashboardPage />;
+                    return <Navigate to={homePathForRoleId(roleId)} replace />;
+                })()}
             </RequireAuth>
         ),
     },
@@ -72,11 +72,11 @@ export const routes = [
         path: "/super-admin",
         element: (
             <RequireAuth>
-                {Number(getStoredSession()?.user?.role_id) === 1 ? (
-                    <SuperAdminDashboardPage />
-                ) : (
-                    <Navigate to="/admin" replace />
-                )}
+                {(() => {
+                    const roleId = normalizeKnownRoleId(getStoredSession());
+                    if (roleId === 1) return <SuperAdminDashboardPage />;
+                    return <Navigate to={homePathForRoleId(roleId)} replace />;
+                })()}
             </RequireAuth>
         ),
     },

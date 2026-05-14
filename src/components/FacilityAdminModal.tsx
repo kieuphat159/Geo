@@ -1,10 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Facility, FacilityType } from "../types/guest";
 import * as adminApi from "../services/adminApi";
+
+export type FacilityAdminModalIntent =
+    | { mode: "create" }
+    | { mode: "edit"; facilityId: string | number };
 
 interface FacilityAdminModalProps {
     open: boolean;
     onClose: () => void;
+    /** Khi mở modal từ dashboard: tạo mới hoặc sửa cơ sở cụ thể */
+    openIntent?: FacilityAdminModalIntent | null;
 }
 
 const DEFAULT_FACILITY_TYPE: FacilityType = 1;
@@ -17,7 +23,7 @@ type ToastState = {
     type: "success" | "error";
 };
 
-export default function FacilityAdminModal({ open, onClose }: FacilityAdminModalProps) {
+export default function FacilityAdminModal({ open, onClose, openIntent = null }: FacilityAdminModalProps) {
     const [facilities, setFacilities] = useState<Facility[]>([]);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -27,6 +33,7 @@ export default function FacilityAdminModal({ open, onClose }: FacilityAdminModal
     const [error, setError] = useState<string | null>(null);
     const [editing, setEditing] = useState<Facility | null>(null);
     const [toast, setToast] = useState<ToastState | null>(null);
+    const intentAppliedKeyRef = useRef<string | null>(null);
 
     const [form, setForm] = useState<Partial<Facility>>({
         name: "",
@@ -49,7 +56,10 @@ export default function FacilityAdminModal({ open, onClose }: FacilityAdminModal
     };
 
     useEffect(() => {
-        if (!open) return;
+        if (!open) {
+            intentAppliedKeyRef.current = null;
+            return;
+        }
 
         let mounted = true;
         const controller = new AbortController();
@@ -81,6 +91,34 @@ export default function FacilityAdminModal({ open, onClose }: FacilityAdminModal
         setEditing(null);
         setForm({ name: "", address: "", lat: 10.7769, lng: 106.7009, type: DEFAULT_FACILITY_TYPE });
     };
+
+    useEffect(() => {
+        if (!open || loading || error) {
+            return;
+        }
+
+        if (!openIntent) {
+            intentAppliedKeyRef.current = null;
+            return;
+        }
+
+        const key = JSON.stringify(openIntent);
+        if (intentAppliedKeyRef.current === key) {
+            return;
+        }
+
+        if (openIntent.mode === "create") {
+            startCreate();
+            intentAppliedKeyRef.current = key;
+            return;
+        }
+
+        const match = facilities.find((f) => String(f.id) === String(openIntent.facilityId));
+        if (match) {
+            startEdit(match);
+            intentAppliedKeyRef.current = key;
+        }
+    }, [open, loading, error, openIntent, facilities]);
 
     const submit = async () => {
         const formType = (form.type as FacilityType | undefined) ?? DEFAULT_FACILITY_TYPE;
@@ -176,6 +214,11 @@ export default function FacilityAdminModal({ open, onClose }: FacilityAdminModal
                                     <div>
                                         <div className="font-semibold">{f.name}</div>
                                         <div className="text-xs text-slate-600">{f.address}</div>
+                                        {f.is_active === false ? (
+                                            <span className="mt-1 inline-block rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+                                                Tạm ngưng
+                                            </span>
+                                        ) : null}
                                     </div>
                                     <div className="flex gap-2">
                                         <button className="rounded-md bg-amber-50 px-2 py-1 text-amber-700 transition-colors hover:bg-amber-100" onClick={() => startEdit(f)} disabled={isBusy}>

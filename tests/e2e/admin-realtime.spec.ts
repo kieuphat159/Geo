@@ -1,8 +1,19 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Page } from "@playwright/test";
+import { AUTH_SESSION_COOKIE_NAME } from "../../src/services/auth";
 
 const BACKEND_URL = "http://localhost:3000";
+/** Phải khớp playwright.config.js — context riêng cho guest không kế thừa cookie admin. */
+const FRONTEND_BASE_URL = "http://localhost:5173";
+
+async function openGuestIsolatedPage(browser: Browser) {
+    const guestContext = await browser.newContext({ baseURL: FRONTEND_BASE_URL });
+    const userPage = await guestContext.newPage();
+    return { guestContext, userPage };
+}
 const SUPER_ADMIN_EMAIL = "admin@geobackend.com";
 const SUPER_ADMIN_PASSWORD = "admin123";
+/** Cố định theo facility — tránh email kiểu admin2+timestamp; mật khẩu chuẩn e2e. */
+const E2E_HOSPITAL_ADMIN_PASSWORD = "E2eBv123";
 const DEFAULT_FACILITY_ID = 1;
 const CLIENT_ID = `e2e-admin-${Math.random().toString(36).slice(2)}`;
 
@@ -33,15 +44,33 @@ async function getFirstFacilityId(page: Page): Promise<number> {
     return Number(first.id);
 }
 
+function e2eHospitalAdminEmail(facilityId: number): string {
+    return `e2e.admin.f${facilityId}@geobackend.com`;
+}
+
 async function createAdminTrucBan(page: Page, superToken: string, facilityId: number) {
-    const email = `admin2+${Date.now()}@geobackend.com`;
-    const password = "admin123";
+    const email = e2eHospitalAdminEmail(facilityId);
+    const password = E2E_HOSPITAL_ADMIN_PASSWORD;
 
     const resp = await page.request.post(`${BACKEND_URL}/api/users`, {
         headers: { Authorization: `Bearer ${superToken}`, "x-client-id": CLIENT_ID },
         data: { email, password, role_id: 2, facility_id: facilityId },
     });
-    expect(resp.status()).toBe(201);
+
+    const status = resp.status();
+    if (status !== 201) {
+        const raw = await resp.text();
+        const body = (() => {
+            try {
+                return JSON.parse(raw) as { message?: string };
+            } catch {
+                return {};
+            }
+        })();
+        const msg = String(body?.message ?? raw);
+        expect(status, `Tạo admin e2e: ${msg}`).toBe(400);
+        expect(msg).toContain("Email đã được sử dụng");
+    }
 
     const adminToken = await loginAndGetToken(page, email, password);
     return { email, password, adminToken };
@@ -225,16 +254,15 @@ async function injectAuthSession(
     email = "e2e-admin@local.test",
 ) {
     await page.addInitScript(
-        ({ token, roleId, email }) => {
-            localStorage.setItem(
-                "geo:auth-session",
-                JSON.stringify({
-                    token,
-                    user: { id: 0, email, role_id: roleId },
-                }),
-            );
+        ({ name, token, roleId, email }) => {
+            const session = JSON.stringify({
+                token,
+                user: { id: 0, email, role_id: roleId },
+            });
+            const value = encodeURIComponent(session);
+            document.cookie = `${encodeURIComponent(name)}=${value}; path=/`;
         },
-        { token, roleId, email },
+        { name: AUTH_SESSION_COOKIE_NAME, token, roleId, email },
     );
 }
 
@@ -270,54 +298,62 @@ test.describe("TC08–TC11 Admin & Real-time", () => {
         expect(json?.message).toContain("Bạn không có quyền truy cập chức năng này");
     });
 
-    test("TC09 - Nhận Alert SOS và zoom ngay", async ({ page, context }) => {
+    test("TC09 - Nhận Alert SOS và zoom ngay", async ({ page, browser }) => {
         const adminToken = await ensureAdminToken(page);
 
         // Admin page
         await injectAuthSession(page, adminToken, 2);
         await page.goto("/hospital");
 
-        // User page (in same context)
-        const userPage = await context.newPage();
-        await mockGeolocation(userPage, supportedVictim);
-        const clientId = `e2e-${Math.random().toString(36).slice(2)}`;
-        await attachSosClientId(userPage, clientId);
-        await userPage.goto("/user");
+        const { guestContext, userPage } = await openGuestIsolatedPage(browser);
+        try {
+            await mockGeolocation(userPage, supportedVictim);
+            const clientId = `e2e-${Math.random().toString(36).slice(2)}`;
+            await attachSosClientId(userPage, clientId);
+            await userPage.goto("/user");
 
-        await userPage.getByRole("button", { name: /emergency sos|sos khẩn cấp/i }).click();
-        await expect(userPage.getByRole("dialog")).toBeVisible();
-        await userPage.getByLabel("Số điện thoại nạn nhân").fill(PHONE);
+            await userPage.getByRole("button", { name: "Emergency SOS" }).click();
+            await expect(userPage.getByRole("dialog")).toBeVisible();
+            await userPage.getByLabel("Số điện thoại nạn nhân").fill(PHONE);
 
-        const banner = page.getByText("Có ca cấp cứu mới đang chờ xử lý", { exact: true });
-        await Promise.all([
-            userPage.waitForResponse("**/api/emergency/sos"),
-            banner.waitFor({ state: "visible", timeout: 15_000 }),
-            userPage.getByRole("button", { name: /xác nhận.*sos|confirm.*sos/i }).click(),
-        ]);
+            const banner = page.getByText("Có ca cấp cứu mới đang chờ xử lý", { exact: true });
+            await Promise.all([
+                userPage.waitForResponse("**/api/emergency/sos"),
+                banner.waitFor({ state: "visible", timeout: 15_000 }),
+                userPage.getByRole("button", { name: /xác nhận.*sos|confirm.*sos/i }).click(),
+            ]);
+        } finally {
+            await guestContext.close();
+        }
     });
 
-    test("TC10 - Điều động & cập nhật toạ độ xe realtime (Admin + User)", async ({ page, context }) => {
-        // User
-        const userPage = await context.newPage();
-        await mockGeolocation(userPage, supportedVictim);
-        const clientId = `e2e-${Math.random().toString(36).slice(2)}`;
-        await attachSosClientId(userPage, clientId);
-        await userPage.goto("/user");
+    test("TC10 - Điều động & cập nhật toạ độ xe realtime (Admin + User)", async ({ page, browser }) => {
+        const { guestContext, userPage } = await openGuestIsolatedPage(browser);
+        let emergencyRequestId = 0;
+        let facilityId = 0;
+        try {
+            await mockGeolocation(userPage, supportedVictim);
+            const clientId = `e2e-${Math.random().toString(36).slice(2)}`;
+            await attachSosClientId(userPage, clientId);
+            await userPage.goto("/user");
 
-        await userPage.getByRole("button", { name: /emergency sos|sos khẩn cấp/i }).click();
-        await expect(userPage.getByRole("dialog")).toBeVisible();
-        await userPage.getByLabel("Số điện thoại nạn nhân").fill(PHONE);
+            await userPage.getByRole("button", { name: "Emergency SOS" }).click();
+            await expect(userPage.getByRole("dialog")).toBeVisible();
+            await userPage.getByLabel("Số điện thoại nạn nhân").fill(PHONE);
 
-        const [sosResponse] = await Promise.all([
-            userPage.waitForResponse("**/api/emergency/sos"),
-            userPage.getByRole("button", { name: /xác nhận.*sos|confirm.*sos/i }).click(),
-        ]);
-        expect(sosResponse.status()).toBe(201);
-        const sosJson = (await sosResponse.json()) as any;
-        const facilityId = Number(sosJson?.assigned_hospital?.id);
-        expect(Number.isFinite(facilityId)).toBe(true);
-        const emergencyRequestId = Number(sosJson?.request_id ?? sosJson?.requestId);
-        expect(Number.isFinite(emergencyRequestId)).toBe(true);
+            const [sosResponse] = await Promise.all([
+                userPage.waitForResponse("**/api/emergency/sos"),
+                userPage.getByRole("button", { name: /xác nhận.*sos|confirm.*sos/i }).click(),
+            ]);
+            expect(sosResponse.status()).toBe(201);
+            const sosJson = (await sosResponse.json()) as any;
+            facilityId = Number(sosJson?.assigned_hospital?.id);
+            expect(Number.isFinite(facilityId)).toBe(true);
+            emergencyRequestId = Number(sosJson?.request_id ?? sosJson?.requestId);
+            expect(Number.isFinite(emergencyRequestId)).toBe(true);
+        } finally {
+            await guestContext.close();
+        }
         // Ensure there is an available ambulance for this facility (TC10).
         const superToken = await ensureSuperAdminToken(page);
         await createAvailableAmbulanceForFacility(page, superToken, facilityId);
@@ -395,32 +431,42 @@ test.describe("TC08–TC11 Admin & Real-time", () => {
         expect(Array.isArray(p1) && p1.length === 2).toBe(true);
         expect(Array.isArray(p2) && p2.length === 2).toBe(true);
 
-        // coordinates: [lng, lat]
-        const dist = Math.hypot(p2[1] - p1[1], p2[0] - p1[0]);
+        // coordinates: [lng, lat] — simulation có thể ghi 2 bản ghi cùng tọa độ; lúc đó so điểm xa hơn.
+        let dist = Math.hypot(p2[1] - p1[1], p2[0] - p1[0]);
+        if (dist <= 0.00001 && filteredSorted.length >= 3) {
+            const p0 = filteredSorted[0].location?.coordinates;
+            expect(Array.isArray(p0) && p0.length === 2).toBe(true);
+            dist = Math.hypot(p2[1] - p0[1], p2[0] - p0[0]);
+        }
         expect(dist).toBeGreaterThan(0.00001);
     });
 
-    test("TC11 - Cập nhật trạng thái: done_at + ambulance 'Rảnh'", async ({ page, context }) => {
-        // User
-        const userPage = await context.newPage();
-        await mockGeolocation(userPage, supportedVictim);
-        const clientId = `e2e-${Math.random().toString(36).slice(2)}`;
-        await attachSosClientId(userPage, clientId);
-        await userPage.goto("/user");
+    test("TC11 - Cập nhật trạng thái: done_at + ambulance 'Rảnh'", async ({ page, browser }) => {
+        const { guestContext, userPage } = await openGuestIsolatedPage(browser);
+        let emergencyRequestId = 0;
+        let facilityId = 0;
+        try {
+            await mockGeolocation(userPage, supportedVictim);
+            const clientId = `e2e-${Math.random().toString(36).slice(2)}`;
+            await attachSosClientId(userPage, clientId);
+            await userPage.goto("/user");
 
-        await userPage.getByRole("button", { name: /emergency sos|sos khẩn cấp/i }).click();
-        await expect(userPage.getByRole("dialog")).toBeVisible();
-        await userPage.getByLabel("Số điện thoại nạn nhân").fill(PHONE);
-        const [sosResponse] = await Promise.all([
-            userPage.waitForResponse("**/api/emergency/sos"),
-            userPage.getByRole("button", { name: /xác nhận.*sos|confirm.*sos/i }).click(),
-        ]);
-        expect(sosResponse.status()).toBe(201);
-        const sosJson = (await sosResponse.json()) as any;
-        const facilityId = Number(sosJson?.assigned_hospital?.id);
-        expect(Number.isFinite(facilityId)).toBe(true);
-        const emergencyRequestId = Number(sosJson?.request_id ?? sosJson?.requestId);
-        expect(Number.isFinite(emergencyRequestId)).toBe(true);
+            await userPage.getByRole("button", { name: "Emergency SOS" }).click();
+            await expect(userPage.getByRole("dialog")).toBeVisible();
+            await userPage.getByLabel("Số điện thoại nạn nhân").fill(PHONE);
+            const [sosResponse] = await Promise.all([
+                userPage.waitForResponse("**/api/emergency/sos"),
+                userPage.getByRole("button", { name: /xác nhận.*sos|confirm.*sos/i }).click(),
+            ]);
+            expect(sosResponse.status()).toBe(201);
+            const sosJson = (await sosResponse.json()) as any;
+            facilityId = Number(sosJson?.assigned_hospital?.id);
+            expect(Number.isFinite(facilityId)).toBe(true);
+            emergencyRequestId = Number(sosJson?.request_id ?? sosJson?.requestId);
+            expect(Number.isFinite(emergencyRequestId)).toBe(true);
+        } finally {
+            await guestContext.close();
+        }
 
         // Ensure there is an available ambulance for this facility (TC11).
         const superToken = await ensureSuperAdminToken(page);
@@ -503,10 +549,11 @@ test.describe("TC08–TC11 Admin & Real-time", () => {
 });
 
 test.describe("TC12–TC14 Admin CRUD & Tracking resilience", () => {
-    test("TC12 - Thêm mới cơ sở và thấy marker phía User", async ({ page, context }) => {
+    test("TC12 - Thêm mới cơ sở và thấy marker phía User", async ({ page, browser }) => {
         const superToken = await ensureSuperAdminToken(page);
         const suffix = Date.now();
-        const facilityName = `E2E Facility ${suffix}`;
+        // Tránh tiền tố "E2E Facility" — guest UI ẩn tên đó (isGuestPresentableFacilityName).
+        const facilityName = `Phòng khám Playwright ${suffix}`;
         // Keep inside default nearby radius around HCMC center so user map fetch returns it.
         const facilityLat = 10.77695;
         const facilityLng = 106.70095;
@@ -542,30 +589,39 @@ test.describe("TC12–TC14 Admin CRUD & Tracking resilience", () => {
         const created = list.find((row: any) => Number(row?.id) === createdId);
         expect(created).toBeTruthy();
 
-        const userPage = await context.newPage();
-        await userPage.goto("/user");
-        await userPage.getByPlaceholder("Tìm theo tên cơ sở...").first().fill(facilityName);
-        await expect(userPage.getByText(facilityName).first()).toBeVisible({ timeout: 15_000 });
+        const { guestContext, userPage } = await openGuestIsolatedPage(browser);
+        try {
+            await userPage.goto("/user");
+            await userPage.getByPlaceholder("Tìm theo tên cơ sở...").first().fill(facilityName);
+            await expect(userPage.getByText(facilityName).first()).toBeVisible({ timeout: 15_000 });
+        } finally {
+            await guestContext.close();
+        }
     });
 
-    test("TC13 - Không cho xóa cơ sở đang xử lý ca SOS", async ({ page, context }) => {
-        const userPage = await context.newPage();
-        await mockGeolocation(userPage, supportedVictim);
-        const clientId = `e2e-${Math.random().toString(36).slice(2)}`;
-        await attachSosClientId(userPage, clientId);
-        await userPage.goto("/user");
-        await userPage.getByRole("button", { name: /emergency sos|sos khẩn cấp/i }).click();
-        await expect(userPage.getByRole("dialog")).toBeVisible();
-        await userPage.getByLabel("Số điện thoại nạn nhân").fill(PHONE);
+    test("TC13 - Không cho xóa cơ sở đang xử lý ca SOS", async ({ page, browser }) => {
+        const { guestContext, userPage } = await openGuestIsolatedPage(browser);
+        let facilityId = 0;
+        try {
+            await mockGeolocation(userPage, supportedVictim);
+            const clientId = `e2e-${Math.random().toString(36).slice(2)}`;
+            await attachSosClientId(userPage, clientId);
+            await userPage.goto("/user");
+            await userPage.getByRole("button", { name: "Emergency SOS" }).click();
+            await expect(userPage.getByRole("dialog")).toBeVisible();
+            await userPage.getByLabel("Số điện thoại nạn nhân").fill(PHONE);
 
-        const [sosResponse] = await Promise.all([
-            userPage.waitForResponse("**/api/emergency/sos"),
-            userPage.getByRole("button", { name: /xác nhận.*sos|confirm.*sos/i }).click(),
-        ]);
-        expect(sosResponse.status()).toBe(201);
-        const sosJson = (await sosResponse.json()) as any;
-        const facilityId = Number(sosJson?.assigned_hospital?.id);
-        expect(Number.isFinite(facilityId)).toBe(true);
+            const [sosResponse] = await Promise.all([
+                userPage.waitForResponse("**/api/emergency/sos"),
+                userPage.getByRole("button", { name: /xác nhận.*sos|confirm.*sos/i }).click(),
+            ]);
+            expect(sosResponse.status()).toBe(201);
+            const sosJson = (await sosResponse.json()) as any;
+            facilityId = Number(sosJson?.assigned_hospital?.id);
+            expect(Number.isFinite(facilityId)).toBe(true);
+        } finally {
+            await guestContext.close();
+        }
 
         const superToken = await ensureSuperAdminToken(page);
         const deleteResp = await page.request.delete(`${BACKEND_URL}/api/facilities/${facilityId}`, {
@@ -576,99 +632,107 @@ test.describe("TC12–TC14 Admin CRUD & Tracking resilience", () => {
         expect(deleteJson?.message).toContain("Không thể xóa cơ sở đang xử lý ca cấp cứu");
     });
 
-    test("TC14 - Mất mạng khi tracking: reconnect và cập nhật vị trí mới nhất", async ({ page, context }) => {
+    test("TC14 - Mất mạng khi tracking: reconnect và cập nhật vị trí mới nhất", async ({ page, browser }) => {
         const testClientId = `e2e-tc14-${Date.now()}`;
-        const userPage = await context.newPage();
-        await mockGeolocation(userPage, supportedVictim);
-        const clientId = `${testClientId}-sos`;
-        await attachSosClientId(userPage, clientId);
-        await userPage.goto("/user");
-        await userPage.getByRole("button", { name: /emergency sos|sos khẩn cấp/i }).click();
-        await expect(userPage.getByRole("dialog")).toBeVisible();
-        await userPage.getByLabel("Số điện thoại nạn nhân").fill(PHONE);
+        const { guestContext, userPage } = await openGuestIsolatedPage(browser);
+        let facilityId = 0;
+        let emergencyId = 0;
+        let ambulanceId = 0;
+        let adminToken = "";
+        try {
+            await mockGeolocation(userPage, supportedVictim);
+            const clientId = `${testClientId}-sos`;
+            await attachSosClientId(userPage, clientId);
+            await userPage.goto("/user");
+            await userPage.getByRole("button", { name: "Emergency SOS" }).click();
+            await expect(userPage.getByRole("dialog")).toBeVisible();
+            await userPage.getByLabel("Số điện thoại nạn nhân").fill(PHONE);
 
-        const [sosResponse] = await Promise.all([
-            userPage.waitForResponse("**/api/emergency/sos"),
-            userPage.getByRole("button", { name: /xác nhận.*sos|confirm.*sos/i }).click(),
-        ]);
-        expect(sosResponse.status()).toBe(201);
-        const sosJson = (await sosResponse.json()) as any;
-        const facilityId = Number(sosJson?.assigned_hospital?.id);
-        const emergencyId = Number(sosJson?.request_id ?? sosJson?.requestId);
-        expect(Number.isFinite(facilityId)).toBe(true);
-        expect(Number.isFinite(emergencyId)).toBe(true);
+            const [sosResponse] = await Promise.all([
+                userPage.waitForResponse("**/api/emergency/sos"),
+                userPage.getByRole("button", { name: /xác nhận.*sos|confirm.*sos/i }).click(),
+            ]);
+            expect(sosResponse.status()).toBe(201);
+            const sosJson = (await sosResponse.json()) as any;
+            facilityId = Number(sosJson?.assigned_hospital?.id);
+            emergencyId = Number(sosJson?.request_id ?? sosJson?.requestId);
+            expect(Number.isFinite(facilityId)).toBe(true);
+            expect(Number.isFinite(emergencyId)).toBe(true);
 
-        const superToken = await ensureSuperAdminToken(page);
-        await createAvailableAmbulanceForFacility(page, superToken, facilityId);
-        const adminToken = await ensureAdminTokenForFacility(page, facilityId);
+            const superToken = await ensureSuperAdminToken(page);
+            await createAvailableAmbulanceForFacility(page, superToken, facilityId);
+            adminToken = await ensureAdminTokenForFacility(page, facilityId);
 
-        const ambulancesResp = await page.request.get(`${BACKEND_URL}/api/ambulances`, {
-            headers: { Authorization: `Bearer ${adminToken}`, "x-client-id": testClientId },
-        });
-        expect(ambulancesResp.status()).toBe(200);
-        const ambulancesJson = (await ambulancesResp.json()) as any;
-        const ambulances = ambulancesJson?.data ?? [];
-        const ambulanceRow = ambulances.find((a: any) => a.status === "available") ?? ambulances[0];
-        expect(ambulanceRow?.id).toBeTruthy();
-        const ambulanceId = Number(ambulanceRow.id);
-
-        const assignResp = await page.request.patch(`${BACKEND_URL}/api/emergency/${emergencyId}/assign`, {
-            headers: {
-                Authorization: `Bearer ${adminToken}`,
-                "x-client-id": testClientId,
-                "Content-Type": "application/json",
-            },
-            data: { ambulance_id: ambulanceId },
-        });
-        expect(assignResp.status()).toBe(200);
-
-        const startSimResp = await page.request.post(`${BACKEND_URL}/api/tracking/simulate/start`, {
-            headers: {
-                Authorization: `Bearer ${adminToken}`,
-                "x-client-id": testClientId,
-                "Content-Type": "application/json",
-            },
-            data: { ambulance_id: ambulanceId, emergency_request_id: emergencyId, interval_ms: 3000 },
-        });
-        expect(startSimResp.status()).toBe(200);
-
-        await userPage.waitForTimeout(8_000);
-        const historyBeforeOfflineResp = await page.request.get(
-            `${BACKEND_URL}/api/tracking/${ambulanceId}/history?limit=10`,
-            {
+            const ambulancesResp = await page.request.get(`${BACKEND_URL}/api/ambulances`, {
                 headers: { Authorization: `Bearer ${adminToken}`, "x-client-id": testClientId },
-            },
-        );
-        expect(historyBeforeOfflineResp.status()).toBe(200);
-        const historyBeforeOfflineJson = (await historyBeforeOfflineResp.json()) as any;
-        const beforePoints = historyBeforeOfflineJson?.data ?? [];
-        const beforeCount = beforePoints.length;
-        expect(beforeCount).toBeGreaterThanOrEqual(2);
+            });
+            expect(ambulancesResp.status()).toBe(200);
+            const ambulancesJson = (await ambulancesResp.json()) as any;
+            const ambulances = ambulancesJson?.data ?? [];
+            const ambulanceRow = ambulances.find((a: any) => a.status === "available") ?? ambulances[0];
+            expect(ambulanceRow?.id).toBeTruthy();
+            ambulanceId = Number(ambulanceRow.id);
 
-        await context.setOffline(true);
-        await expect(userPage.getByText("Đang kết nối lại...")).toBeVisible({ timeout: 12_000 });
-        await userPage.waitForTimeout(6_000);
+            const assignResp = await page.request.patch(`${BACKEND_URL}/api/emergency/${emergencyId}/assign`, {
+                headers: {
+                    Authorization: `Bearer ${adminToken}`,
+                    "x-client-id": testClientId,
+                    "Content-Type": "application/json",
+                },
+                data: { ambulance_id: ambulanceId },
+            });
+            expect(assignResp.status()).toBe(200);
 
-        await context.setOffline(false);
+            const startSimResp = await page.request.post(`${BACKEND_URL}/api/tracking/simulate/start`, {
+                headers: {
+                    Authorization: `Bearer ${adminToken}`,
+                    "x-client-id": testClientId,
+                    "Content-Type": "application/json",
+                },
+                data: { ambulance_id: ambulanceId, emergency_request_id: emergencyId, interval_ms: 3000 },
+            });
+            expect(startSimResp.status()).toBe(200);
 
-        const reconnectStart = Date.now();
-        let afterCount = beforeCount;
-        while (Date.now() - reconnectStart < 20_000) {
-            const historyAfterResp = await page.request.get(
-                `${BACKEND_URL}/api/tracking/${ambulanceId}/history?limit=20`,
+            await userPage.waitForTimeout(8_000);
+            const historyBeforeOfflineResp = await page.request.get(
+                `${BACKEND_URL}/api/tracking/${ambulanceId}/history?limit=10`,
                 {
                     headers: { Authorization: `Bearer ${adminToken}`, "x-client-id": testClientId },
                 },
             );
-            if (historyAfterResp.status() === 200) {
-                const historyAfterJson = (await historyAfterResp.json()) as any;
-                const afterPoints = historyAfterJson?.data ?? [];
-                afterCount = afterPoints.length;
-                if (afterCount > beforeCount) break;
+            expect(historyBeforeOfflineResp.status()).toBe(200);
+            const historyBeforeOfflineJson = (await historyBeforeOfflineResp.json()) as any;
+            const beforePoints = historyBeforeOfflineJson?.data ?? [];
+            const beforeCount = beforePoints.length;
+            expect(beforeCount).toBeGreaterThanOrEqual(2);
+
+            await guestContext.setOffline(true);
+            await expect(userPage.getByText("Đang kết nối lại...")).toBeVisible({ timeout: 12_000 });
+            await userPage.waitForTimeout(6_000);
+
+            await guestContext.setOffline(false);
+
+            const reconnectStart = Date.now();
+            let afterCount = beforeCount;
+            while (Date.now() - reconnectStart < 20_000) {
+                const historyAfterResp = await page.request.get(
+                    `${BACKEND_URL}/api/tracking/${ambulanceId}/history?limit=20`,
+                    {
+                        headers: { Authorization: `Bearer ${adminToken}`, "x-client-id": testClientId },
+                    },
+                );
+                if (historyAfterResp.status() === 200) {
+                    const historyAfterJson = (await historyAfterResp.json()) as any;
+                    const afterPoints = historyAfterJson?.data ?? [];
+                    afterCount = afterPoints.length;
+                    if (afterCount > beforeCount) break;
+                }
+                await userPage.waitForTimeout(800);
             }
-            await userPage.waitForTimeout(800);
+            expect(afterCount).toBeGreaterThan(beforeCount);
+        } finally {
+            await guestContext.close();
         }
-        expect(afterCount).toBeGreaterThan(beforeCount);
     });
 });
 

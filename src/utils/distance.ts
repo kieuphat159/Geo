@@ -40,3 +40,17 @@ export function formatDistanceLabel(distanceMeters?: number): string {
 
     return `${(distanceMeters / 1000).toFixed(1)} km`;
 }
+
+/**
+ * Rough drive-time estimate from straight-line distance (no routing API).
+ * Uses an average urban speed suitable for mixed traffic (scooter / car).
+ */
+export function estimateDriveMinutesFromMeters(distanceMeters?: number, avgSpeedKmh = 28): number | null {
+    if (typeof distanceMeters !== "number" || !Number.isFinite(distanceMeters) || distanceMeters <= 0) {
+        return null;
+    }
+
+    const hours = distanceMeters / 1000 / avgSpeedKmh;
+    const minutes = Math.round(hours * 60);
+    return Math.max(1, minutes);
+}

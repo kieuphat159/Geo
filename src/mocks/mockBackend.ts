@@ -378,6 +378,26 @@ export function initMockBackend(): void {
             .toUpperCase()
             .trim();
 
+        if (requestUrl.pathname.endsWith("/api/facilities/admin-overview") && method === "GET") {
+            const data = MOCK_FACILITIES.map((feat) => {
+                const [lng, lat] = feat.geometry.coordinates;
+                const ft = feat.properties.facility_type;
+                return {
+                    id: feat.properties.id,
+                    name: feat.properties.name,
+                    address: feat.properties.address,
+                    phone: feat.properties.phone,
+                    facility_type: ft,
+                    type: ft === 1 ? "hospital" : "pharmacy",
+                    lat,
+                    lng,
+                    is_active: true,
+                    location: feat.geometry,
+                };
+            });
+            return jsonResponse({ status: "success", data });
+        }
+
         if (requestUrl.pathname.endsWith(FACILITIES_PATH) && method === "GET") {
             console.log("[MOCK] Intercepted GET", requestUrl.toString());
 
