@@ -3,6 +3,7 @@
  */
 
 import { MapContainer, Marker, TileLayer } from "react-leaflet";
+import { formControlClassName } from "../constants/formClasses";
 import { guestStrings } from "../constants/guestStrings";
 import { userLocationIcon } from "../utils/mapIcons";
 
@@ -78,7 +79,7 @@ export default function SosConfirmationModal({
                         {guestStrings.sosPhoneLabel}
                     </span>
                     <input
-                        className="h-12 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-500"
+                        className={`h-12 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none transition focus:border-red-300 focus:ring-2 focus:ring-red-500 ${formControlClassName}`}
                         type="tel"
                         inputMode="numeric"
                         autoComplete="tel"

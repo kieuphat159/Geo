@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { formControlClassName } from "../constants/formClasses";
 import type { Facility, FacilityType } from "../types/guest";
+
+const facilityFormFieldClass = `w-full rounded border border-slate-200 px-2 py-1 ${formControlClassName}`;
 import * as adminApi from "../services/adminApi";
 
 export type FacilityAdminModalIntent =
@@ -178,7 +181,7 @@ export default function FacilityAdminModal({ open, onClose, openIntent = null }:
         <div className="fixed inset-0 z-[900] grid place-items-center bg-black/40 p-4">
             <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl transition-all duration-200 ease-out">
                 <div className="flex items-start justify-between gap-4">
-                    <h3 className="text-lg font-bold">Quản lý cơ sở y tế</h3>
+                    <h3 className="text-lg font-bold text-slate-900">Quản lý cơ sở y tế</h3>
                     <div className="flex gap-2">
                         <button className="rounded-md bg-slate-100 px-3 py-2 transition-colors hover:bg-slate-200" onClick={startCreate} disabled={isBusy}>
                             Thêm mới
@@ -241,17 +244,17 @@ export default function FacilityAdminModal({ open, onClose, openIntent = null }:
                     <div>
                         <h4 className="font-semibold">{editing ? "Sửa cơ sở" : "Tạo cơ sở mới"}</h4>
                         <div className="mt-2 grid gap-2">
-                            <input className="w-full rounded border px-2 py-1" placeholder="Tên" value={form.name ?? ""} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} />
-                            <input className="w-full rounded border px-2 py-1" placeholder="Địa chỉ" value={form.address ?? ""} onChange={(e) => setForm((s) => ({ ...s, address: e.target.value }))} />
+                            <input className={facilityFormFieldClass} placeholder="Tên" value={form.name ?? ""} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} />
+                            <input className={facilityFormFieldClass} placeholder="Địa chỉ" value={form.address ?? ""} onChange={(e) => setForm((s) => ({ ...s, address: e.target.value }))} />
                             <div className="flex gap-2">
-                                <input className="w-1/2 rounded border px-2 py-1" placeholder="Lat" value={String(form.lat ?? "")}
+                                <input className={`w-1/2 ${facilityFormFieldClass}`} placeholder="Lat" value={String(form.lat ?? "")}
                                     onChange={(e) => setForm((s) => ({ ...s, lat: Number(e.target.value) }))} />
-                                <input className="w-1/2 rounded border px-2 py-1" placeholder="Lng" value={String(form.lng ?? "")}
+                                <input className={`w-1/2 ${facilityFormFieldClass}`} placeholder="Lng" value={String(form.lng ?? "")}
                                     onChange={(e) => setForm((s) => ({ ...s, lng: Number(e.target.value) }))} />
                             </div>
-                            <input className="w-full rounded border px-2 py-1" placeholder="Hotline" value={form.phone ?? ""} onChange={(e) => setForm((s) => ({ ...s, phone: e.target.value }))} />
+                            <input className={facilityFormFieldClass} placeholder="Hotline" value={form.phone ?? ""} onChange={(e) => setForm((s) => ({ ...s, phone: e.target.value }))} />
                             <select
-                                className="w-full rounded border px-2 py-1"
+                                className={facilityFormFieldClass}
                                 aria-label="Loại cơ sở"
                                 value={String(selectedType)}
                                 onChange={(e) => setForm((s) => ({ ...s, type: Number(e.target.value) as FacilityType }))}

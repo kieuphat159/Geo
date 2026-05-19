@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { formControlClassName } from "../constants/formClasses";
 import { login, loginWithGoogle } from "../services/auth";
+
+const loginFieldClass = `mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 ${formControlClassName}`;
 
 function routeByRole(roleId: number): string {
   const normalizedRoleId = Number(roleId);
@@ -109,7 +112,7 @@ export default function LoginPage() {
         <label className="block mt-4">
           <span className="text-sm font-semibold text-slate-700">Email</span>
           <input
-            className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 text-slate-700 placeholder:text-slate-400"
+            className={loginFieldClass}
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -119,7 +122,7 @@ export default function LoginPage() {
         <label className="block mt-3">
           <span className="text-sm font-semibold text-slate-700">Mật khẩu</span>
           <input
-            className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 text-slate-700 placeholder:text-slate-400"
+            className={loginFieldClass}
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

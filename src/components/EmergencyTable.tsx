@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import type { EmergencyCase } from "../types/emergency";
 
+const dispatchSelectClass = `geo-form-control rounded-lg border border-slate-200 bg-white text-slate-900`;
+
 interface AmbulanceRow {
     id: number;
     plate_number: string;
@@ -139,7 +141,7 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                                 </label>
                                 <select
                                     id={`amb-pick-${row.id}`}
-                                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                    className={`w-full px-3 py-2 text-sm ${dispatchSelectClass}`}
                                     value={resolvePick(row.id)}
                                     onChange={(e) => setPickByRow((p) => ({ ...p, [row.id]: e.target.value }))}
                                     disabled={availableAmbulances.length === 0}
@@ -256,7 +258,7 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                                 <td className="px-5 py-4 text-slate-700">
                                     {row.status === "WAITING" && onDispatch ? (
                                         <select
-                                            className="max-w-[140px] rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-medium"
+                                            className={`max-w-[140px] px-2 py-1.5 text-xs font-medium ${dispatchSelectClass}`}
                                             value={resolvePick(row.id)}
                                             onChange={(e) => setPickByRow((p) => ({ ...p, [row.id]: e.target.value }))}
                                             disabled={availableAmbulances.length === 0}
