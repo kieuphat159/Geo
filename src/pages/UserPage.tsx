@@ -22,6 +22,7 @@ import type {
     TrackingSocketEvent,
 } from "../types/guest";
 import { haversineDistanceMeters } from "../utils/distance";
+import { useTrimmedRoutePath } from "../utils/routePath";
 import { isGuestPresentableFacilityName } from "../utils/facilityDisplay";
 import { telHrefFromDisplay } from "../utils/phone";
 
@@ -186,6 +187,11 @@ export default function UserPage() {
     const [sessionRestoreMessage, setSessionRestoreMessage] = useState<string | null>(null);
 
     const animatedAmbulancePosition = useAnimatedPosition(ambulanceTargetPosition, 800);
+    const displayedRoutePath = useTrimmedRoutePath(
+        routePath,
+        mode === "tracking" || mode === "completed" ? animatedAmbulancePosition : null,
+        activeRequestId,
+    );
 
     const lookupPosition = useMemo<[number, number]>(() => currentPosition ?? HCMC_CENTER, [currentPosition]);
 
@@ -948,7 +954,7 @@ export default function UserPage() {
                         sosPosition={sosPosition}
                         assignedHospital={assignedHospital}
                         ambulancePosition={animatedAmbulancePosition}
-                        routePath={routePath}
+                        routePath={displayedRoutePath}
                         layoutSignature={mapLayoutSignature}
                     />
                 </div>

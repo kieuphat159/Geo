@@ -3,6 +3,7 @@
  */
 
 import { useState, type ReactNode } from "react";
+import { formControlClassName } from "../constants/formClasses";
 import { guestStrings } from "../constants/guestStrings";
 import type { FacilityFilterType } from "../types/guest";
 
@@ -107,7 +108,7 @@ export default function FacilityFilterPanel({
                 <label className={`${isPanel ? "mt-1.5" : "mt-3"} block`}>
                     <span className="sr-only">{guestStrings.searchPlaceholder}</span>
                     <input
-                        className={`${isPanel ? "h-9 text-xs" : "h-12 text-sm"} w-full rounded-xl border border-violet-100 bg-white px-3 text-slate-800 outline-none ring-violet-500 transition focus:border-violet-300 focus:ring-2`}
+                        className={`${isPanel ? "h-9 text-xs" : "h-12 text-sm"} w-full rounded-xl border border-violet-100 px-3 outline-none ring-violet-500 transition focus:border-violet-300 focus:ring-2 ${formControlClassName}`}
                         type="text"
                         value={searchText}
                         placeholder={guestStrings.searchPlaceholder}

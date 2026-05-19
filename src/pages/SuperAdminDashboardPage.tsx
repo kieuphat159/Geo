@@ -4,6 +4,7 @@ import FacilityAdminModal, { type FacilityAdminModalIntent } from "../components
 import * as adminApi from "../services/adminApi";
 import { clearSession, getStoredSession } from "../services/auth";
 import type { Facility } from "../types/guest";
+import { formControlFieldClassName, formControlFieldClassNameMt1 } from "../constants/formClasses";
 import { maskEmailForDisplay } from "../utils/maskEmail";
 
 type ManagedUser = {
@@ -467,13 +468,13 @@ export default function SuperAdminDashboardPage() {
                             <input
                                 type="search"
                                 placeholder="Tìm theo tên cơ sở..."
-                                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm sm:max-w-xs"
+                                className={`${formControlFieldClassName} sm:max-w-xs`}
                                 value={facilitySearch}
                                 onChange={(e) => setFacilitySearch(e.target.value)}
                                 aria-label="Tìm cơ sở y tế"
                             />
                             <select
-                                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm sm:w-56"
+                                className={`${formControlFieldClassName} sm:w-56`}
                                 value={String(facilityFilter)}
                                 onChange={(e) =>
                                     setFacilityFilter(
@@ -587,7 +588,7 @@ export default function SuperAdminDashboardPage() {
                         <div className="mt-4 shrink-0">
                             <input
                                 type="search"
-                                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                className={formControlFieldClassName}
                                 placeholder="Tìm theo email hoặc tên cơ sở gán cho admin..."
                                 value={adminSearch}
                                 onChange={(e) => setAdminSearch(e.target.value)}
@@ -705,7 +706,7 @@ export default function SuperAdminDashboardPage() {
                                 </label>
                                 <input
                                     id="sa-admin-email"
-                                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                    className={formControlFieldClassNameMt1}
                                     placeholder="ten.admin@domain.com"
                                     type="email"
                                     autoComplete="off"
@@ -719,7 +720,7 @@ export default function SuperAdminDashboardPage() {
                                 </label>
                                 <input
                                     id="sa-admin-password"
-                                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                    className={formControlFieldClassNameMt1}
                                     placeholder="Tối thiểu 8 ký tự"
                                     type="password"
                                     autoComplete="new-password"
@@ -744,7 +745,7 @@ export default function SuperAdminDashboardPage() {
                                 </label>
                                 <select
                                     id="sa-admin-facility"
-                                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                    className={formControlFieldClassNameMt1}
                                     aria-label="Chọn bệnh viện cho admin"
                                     value={facilityId === "" ? "" : String(facilityId)}
                                     onChange={(e) => setFacilityId(e.target.value ? Number(e.target.value) : "")}
@@ -835,7 +836,7 @@ export default function SuperAdminDashboardPage() {
                                 </label>
                                 <input
                                     id="edit-admin-email"
-                                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                    className={formControlFieldClassNameMt1}
                                     type="email"
                                     autoComplete="off"
                                     spellCheck={false}
@@ -894,7 +895,7 @@ export default function SuperAdminDashboardPage() {
                                 </label>
                                 <select
                                     id="edit-admin-facility"
-                                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                    className={formControlFieldClassNameMt1}
                                     aria-label="Chọn bệnh viện cho admin"
                                     value={editAdminFacilityId === "" ? "" : String(editAdminFacilityId)}
                                     onChange={(e) => setEditAdminFacilityId(e.target.value ? Number(e.target.value) : "")}
@@ -917,7 +918,7 @@ export default function SuperAdminDashboardPage() {
                                 </label>
                                 <input
                                     id="edit-admin-password"
-                                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                    className={formControlFieldClassNameMt1}
                                     placeholder="Để trống nếu giữ nguyên; hoặc nhập rồi bấm «Dùng mật trong ô & hiển thị»"
                                     type="password"
                                     autoComplete="new-password"
