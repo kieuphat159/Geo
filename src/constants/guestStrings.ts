@@ -40,6 +40,12 @@ export const guestStrings = {
     locationReady: "Đã cập nhật vị trí hiện tại.",
     locationDenied: "Cần cấp quyền GPS để sử dụng tính năng này.",
     locationFailed: "Không thể lấy vị trí. Vui lòng thử lại.",
+    locationOutsideSupportedArea:
+        "Vị trí của bạn nằm ngoài khu vực hỗ trợ. Hiện hệ thống chỉ phục vụ tại TP. Hồ Chí Minh.",
+    locationOutsideSupportedAreaTitle: "Ngoài khu vực hỗ trợ",
+    locationOutsideSupportedAreaBody:
+        "Ứng dụng và dữ liệu cơ sở y tế hiện chỉ áp dụng cho TP. Hồ Chí Minh. Vui lòng di chuyển vào khu vực này để sử dụng định vị và SOS khẩn cấp.",
+    locationOutsideSupportedAreaRetry: "Thử định vị lại",
     sosButton: "SOS khẩn cấp",
     sosPrepareError: "Không thể gửi SOS khi chưa có vị trí.",
     sosModalTitle: "Xác nhận gửi yêu cầu SOS",

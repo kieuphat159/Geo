@@ -148,25 +148,14 @@ test.describe("TC04–TC07 SOS (Guest)", () => {
     });
 
     test("TC06 - SOS ngoài phạm vi", async ({ page }) => {
-        const clientId = `e2e-${Math.random().toString(36).slice(2)}`;
-        await attachSosClientId(page, clientId);
         await mockGeolocation(page, outsideVictim);
 
         await page.goto("/user");
         await page.getByRole("button", { name: "Emergency SOS" }).click();
 
-        await expect(page.getByRole("dialog")).toBeVisible();
-        await page.getByLabel("Số điện thoại nạn nhân").fill(PHONE);
-
-        const [sosResponse] = await Promise.all([
-            page.waitForResponse("**/api/emergency/sos"),
-            page.getByRole("button", { name: /xác nhận.*gửi sos|confirm.*send sos/i }).click(),
-        ]);
-
-        expect(sosResponse.status()).toBe(400);
-
-        const modalErrorText = await page.locator("text=Vị trí nằm ngoài vùng hỗ trợ").first();
-        await expect(modalErrorText).toBeVisible();
+        await expect(page.getByRole("alertdialog")).toBeVisible();
+        await expect(page.getByText("Ngoài khu vực hỗ trợ")).toBeVisible();
+        await expect(page.getByText("Xác nhận gửi yêu cầu SOS")).toHaveCount(0);
     });
 
     test("TC07 - Định tuyến (Routing) + LineString không thẳng", async ({ page }) => {
