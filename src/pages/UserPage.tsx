@@ -25,6 +25,7 @@ import { haversineDistanceMeters } from "../utils/distance";
 import { useTrimmedRoutePath } from "../utils/routePath";
 import { isGuestPresentableFacilityName } from "../utils/facilityDisplay";
 import { telHrefFromDisplay } from "../utils/phone";
+import { isInSupportedArea } from "../utils/supportedArea";
 
 const HCMC_CENTER: [number, number] = [10.7769, 106.7009];
 const SOS_SUCCESS_OVERLAY_MS = 1800;
@@ -156,6 +157,7 @@ export default function UserPage() {
     const [locationError, setLocationError] = useState<string | null>(null);
     const [isLocating, setIsLocating] = useState(false);
     const [locateContext, setLocateContext] = useState<"sos" | "manual">("manual");
+    const [outsideAreaBlocked, setOutsideAreaBlocked] = useState(false);
 
     const [filterType, setFilterType] = useState<FacilityFilterType>("all");
     const [searchText, setSearchText] = useState("");
@@ -333,8 +335,15 @@ export default function UserPage() {
         try {
             const parsed = JSON.parse(cachedLocation) as { latitude: number; longitude: number };
             if (Number.isFinite(parsed.latitude) && Number.isFinite(parsed.longitude)) {
-                setCurrentPosition([parsed.latitude, parsed.longitude]);
-                setStatusMessage(guestStrings.locationReady);
+                if (isInSupportedArea(parsed.latitude, parsed.longitude)) {
+                    setCurrentPosition([parsed.latitude, parsed.longitude]);
+                    setStatusMessage(guestStrings.locationReady);
+                } else {
+                    localStorage.removeItem("guest:last-location");
+                    setOutsideAreaBlocked(true);
+                    setLocationError(guestStrings.locationOutsideSupportedArea);
+                    setStatusMessage(guestStrings.locationOutsideSupportedArea);
+                }
             }
         } catch {
             localStorage.removeItem("guest:last-location");
@@ -343,6 +352,11 @@ export default function UserPage() {
 
     useEffect(() => {
         if (!currentPosition) {
+            return;
+        }
+
+        if (!isInSupportedArea(currentPosition[0], currentPosition[1])) {
+            localStorage.removeItem("guest:last-location");
             return;
         }
 
@@ -419,11 +433,23 @@ export default function UserPage() {
         async (purpose: "sos" | "manual" = "manual"): Promise<[number, number] | null> => {
             setLocateContext(purpose);
             setLocationError(null);
+            setOutsideAreaBlocked(false);
             setStatusMessage(purpose === "sos" ? guestStrings.sosAcquiringLocation : guestStrings.locationRequesting);
             setIsLocating(true);
 
             try {
                 const position = await requestCurrentGpsPosition();
+                const [lat, lng] = position;
+
+                if (!isInSupportedArea(lat, lng)) {
+                    setCurrentPosition(null);
+                    setOutsideAreaBlocked(true);
+                    setLocationError(guestStrings.locationOutsideSupportedArea);
+                    setStatusMessage(guestStrings.locationOutsideSupportedArea);
+                    return null;
+                }
+
+                setOutsideAreaBlocked(false);
                 setCurrentPosition(position);
                 setStatusMessage(guestStrings.locationReady);
                 return position;
@@ -477,6 +503,13 @@ export default function UserPage() {
     const handleSosHereForFacility = useCallback(
         (facility: Facility) => {
             if (mode !== "browse") {
+                return;
+            }
+
+            if (!isInSupportedArea(facility.lat, facility.lng)) {
+                setOutsideAreaBlocked(true);
+                setLocationError(guestStrings.locationOutsideSupportedArea);
+                setStatusMessage(guestStrings.locationOutsideSupportedArea);
                 return;
             }
 
@@ -733,7 +766,7 @@ export default function UserPage() {
                                     onClick={() => {
                                         void acquireCurrentLocation();
                                     }}
-                                    disabled={isLocating}
+                                    disabled={isLocating || outsideAreaBlocked}
                                     title={guestStrings.locateButton}
                                 >
                                     {guestStrings.locateButton}
@@ -754,7 +787,8 @@ export default function UserPage() {
                             <div
                                 className={`mt-2 flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-medium ${
                                     statusMessage === guestStrings.locationDenied ||
-                                    statusMessage === guestStrings.locationFailed
+                                    statusMessage === guestStrings.locationFailed ||
+                                    statusMessage === guestStrings.locationOutsideSupportedArea
                                         ? "border-amber-200 bg-amber-50 text-amber-900"
                                         : currentPosition
                                           ? "border-emerald-200 bg-emerald-50 text-emerald-900"
@@ -999,7 +1033,7 @@ export default function UserPage() {
                             onClick={() => {
                                 void acquireCurrentLocation();
                             }}
-                            disabled={isLocating}
+                            disabled={isLocating || outsideAreaBlocked}
                         >
                             {guestStrings.locateButton}
                         </button>
@@ -1007,7 +1041,9 @@ export default function UserPage() {
 
                     <div
                         className={`pointer-events-auto mx-auto mt-2 flex w-full max-w-[430px] items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium shadow-md backdrop-blur md:ml-[336px] md:mr-3 md:w-fit md:max-w-[420px] ${
-                            statusMessage === guestStrings.locationDenied || statusMessage === guestStrings.locationFailed
+                            statusMessage === guestStrings.locationDenied ||
+                            statusMessage === guestStrings.locationFailed ||
+                            statusMessage === guestStrings.locationOutsideSupportedArea
                                 ? "border-amber-300/80 bg-amber-50/95 text-amber-900"
                                 : currentPosition
                                   ? "border-emerald-300/80 bg-emerald-50/95 text-emerald-900"
@@ -1068,7 +1104,7 @@ export default function UserPage() {
                     />
                 ) : null}
 
-                {locationError ? (
+                {locationError && !outsideAreaBlocked ? (
                     <div className="pointer-events-auto absolute left-1/2 top-[max(5.75rem,calc(env(safe-area-inset-top)+5rem))] z-[710] w-[calc(100%-1rem)] max-w-[430px] -translate-x-1/2 rounded-2xl border border-red-200 bg-red-50/95 p-3 text-sm shadow-lg md:left-[336px] md:w-[min(430px,calc(100%-21rem))] md:max-w-none md:translate-x-0 lg:left-4 lg:top-[5.5rem] lg:w-[min(430px,calc(100%-2rem))]">
                         <p className="font-semibold text-red-700">{locationError}</p>
                         <button
@@ -1102,9 +1138,38 @@ export default function UserPage() {
                         <SosButton
                             variant="dock"
                             onClick={handleSosClick}
-                            disabled={isLocating || isSendingSos}
+                            disabled={isLocating || isSendingSos || outsideAreaBlocked}
                         />
                     </div>
+                </div>
+            ) : null}
+
+            {outsideAreaBlocked && mode === "browse" ? (
+                <div
+                    className="absolute inset-0 z-[1070] grid place-items-center bg-slate-900/60 p-4"
+                    role="alertdialog"
+                    aria-modal="true"
+                    aria-labelledby="outside-area-title"
+                    aria-describedby="outside-area-body"
+                >
+                    <article className="w-full max-w-[430px] rounded-3xl border border-amber-200 bg-white p-6 text-center shadow-2xl">
+                        <p id="outside-area-title" className="text-lg font-bold text-amber-800">
+                            {guestStrings.locationOutsideSupportedAreaTitle}
+                        </p>
+                        <p id="outside-area-body" className="mt-3 text-sm leading-relaxed text-slate-700">
+                            {guestStrings.locationOutsideSupportedAreaBody}
+                        </p>
+                        <button
+                            className="mt-5 min-h-12 w-full rounded-xl bg-violet-800 px-4 text-sm font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            type="button"
+                            disabled={isLocating}
+                            onClick={() => {
+                                void acquireCurrentLocation();
+                            }}
+                        >
+                            {guestStrings.locationOutsideSupportedAreaRetry}
+                        </button>
+                    </article>
                 </div>
             ) : null}
 
