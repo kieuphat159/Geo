@@ -9,12 +9,13 @@ const EMERGENCIES_ENDPOINT = "/api/emergencies";
 const AMBULANCES_ENDPOINT = "/api/ambulances";
 const USERS_ENDPOINT = "/api/users";
 
-type FacilityApiType = "hospital" | "pharmacy";
+type FacilityApiType = "hospital" | "pharmacy" | "clinic";
 
 function toFacilityTypeValue(type: unknown): FacilityApiType {
     if (type === 1 || type === "hospital") return "hospital";
-    // Backend currently stores non-hospital in the same enum branch.
-    return "pharmacy";
+    if (type === 2 || type === "clinic") return "clinic";
+    if (type === 3 || type === "pharmacy") return "pharmacy";
+    return "hospital";
 }
 
 function fromFacilityApi(raw: any): Facility {
@@ -27,9 +28,14 @@ function fromFacilityApi(raw: any): Facility {
             ? mappedFacilityType
             : raw?.type === "hospital"
               ? 1
-              : 3;
+              : raw?.type === "clinic"
+                ? 2
+                : raw?.type === "pharmacy"
+                  ? 3
+                  : 1;
+    const id = raw?.id ?? raw?.dataValues?.id;
     return {
-        id: raw?.id,
+        id,
         name: raw?.name ?? "",
         address: raw?.address ?? "",
         phone: raw?.phone ?? "",
@@ -91,6 +97,28 @@ export async function fetchEmergencies(signal?: AbortSignal) {
     const payload = (await handleJsonResponse(resp)) as any;
     // Backend contract for dispatcher dashboard returns an array.
     return (Array.isArray(payload) ? payload : payload?.data ?? payload?.results ?? payload?.data ?? []);
+}
+
+export async function createAmbulance(payload: { plate_number: string; facility_id: number }) {
+    const url = resolveApiUrl(AMBULANCES_ENDPOINT);
+    const resp = await authorizedFetch(url.toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+    });
+    const parsed = (await handleJsonResponse(resp)) as any;
+    return parsed?.data ?? parsed;
+}
+
+export async function updateAmbulanceStatus(ambulanceId: number, status: "available" | "dispatched" | "maintenance") {
+    const url = resolveApiUrl(`${AMBULANCES_ENDPOINT}/${ambulanceId}/status`);
+    const resp = await authorizedFetch(url.toString(), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ status }),
+    });
+    const parsed = (await handleJsonResponse(resp)) as any;
+    return parsed?.data ?? parsed;
 }
 
 export async function fetchAmbulances(signal?: AbortSignal) {
@@ -198,7 +226,9 @@ export async function fetchFacilitiesAdmin(signal?: AbortSignal) {
 
     const parsed = (await handleJsonResponse(resp)) as any;
     const rows = Array.isArray(parsed) ? parsed : parsed?.data ?? [];
-    return rows.map(fromFacilityApi);
+    return rows
+        .map((row: unknown) => fromFacilityApi(row))
+        .filter((f: Facility) => f.id !== undefined && f.id !== null && f.id !== "");
 }
 
 export async function fetchUsers(signal?: AbortSignal) {
@@ -267,6 +297,8 @@ export async function deactivateHospitalAdmin(userId: number) {
 
 export default {
     fetchEmergencies,
+    createAmbulance,
+    updateAmbulanceStatus,
     fetchAmbulances,
     assignAmbulance,
     startTrackingSimulation,

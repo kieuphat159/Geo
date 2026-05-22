@@ -1,10 +1,19 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import AppModal from "../components/AppModal";
+import AppPageShell from "../components/AppPageShell";
 import FacilityAdminModal, { type FacilityAdminModalIntent } from "../components/FacilityAdminModal";
 import * as adminApi from "../services/adminApi";
-import { clearSession, getStoredSession } from "../services/auth";
+import { getStoredSession, logout } from "../services/auth";
 import type { Facility } from "../types/guest";
-import { formControlFieldClassName, formControlFieldClassNameMt1 } from "../constants/formClasses";
+import {
+    btnDangerClass,
+    btnPrimaryClass,
+    btnSecondaryClass,
+    formControlFieldClassName,
+    formControlFieldClassNameMt1,
+} from "../constants/formClasses";
+import { dedupeFacilitiesById, upsertFacilityInList } from "../utils/adminFacilities";
 import { maskEmailForDisplay } from "../utils/maskEmail";
 
 type ManagedUser = {
@@ -38,6 +47,20 @@ function normalizeVi(s: string) {
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
         .toLowerCase();
+}
+
+function dedupeUsersById(list: ManagedUser[]): ManagedUser[] {
+    const seen = new Set<number>();
+    const out: ManagedUser[] = [];
+    for (const u of list) {
+        const id = Number(u.id);
+        if (!Number.isFinite(id) || seen.has(id)) {
+            continue;
+        }
+        seen.add(id);
+        out.push(u);
+    }
+    return out;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -102,7 +125,7 @@ export default function SuperAdminDashboardPage() {
         const loadErrors: string[] = [];
 
         if (facilityResult.status === "fulfilled") {
-            setFacilities((facilityResult.value || []) as Facility[]);
+            setFacilities(dedupeFacilitiesById((facilityResult.value || []) as Facility[]));
         } else {
             if (isAbortError(facilityResult.reason) || signal?.aborted) {
                 return;
@@ -113,7 +136,7 @@ export default function SuperAdminDashboardPage() {
         }
 
         if (userResult.status === "fulfilled") {
-            setUsers((userResult.value || []) as ManagedUser[]);
+            setUsers(dedupeUsersById((userResult.value || []) as ManagedUser[]));
         } else {
             if (isAbortError(userResult.reason) || signal?.aborted) {
                 return;
@@ -124,7 +147,7 @@ export default function SuperAdminDashboardPage() {
         }
 
         if (unauthorized) {
-            clearSession();
+            logout();
             navigate("/login", { replace: true });
             return;
         }
@@ -177,7 +200,7 @@ export default function SuperAdminDashboardPage() {
     );
 
     const filteredFacilities = useMemo(() => {
-        let list = facilities;
+        let list = dedupeFacilitiesById(facilities);
         if (facilityFilter !== "all") {
             list = list.filter((f) => Number(f.type) === Number(facilityFilter));
         }
@@ -185,21 +208,62 @@ export default function SuperAdminDashboardPage() {
         if (!q) {
             return list;
         }
-        return list.filter((f) => normalizeVi(f.name).includes(q));
+        return list.filter((f) => {
+            const haystack = normalizeVi(`${f.name} ${f.address ?? ""}`);
+            return haystack.includes(q);
+        });
     }, [facilities, facilityFilter, facilitySearch]);
+
+    const handleFacilitySaved = useCallback((facility: Facility) => {
+        setFacilities((prev) => upsertFacilityInList(prev, facility));
+        setUsers((prev) =>
+            prev.map((u) =>
+                Number(u.facility_id) === Number(facility.id) && u.MedicalFacility
+                    ? { ...u, MedicalFacility: { ...u.MedicalFacility, name: facility.name } }
+                    : u,
+            ),
+        );
+    }, []);
+
+    const handleFacilityDeleted = useCallback((facilityId: string | number) => {
+        setFacilities((prev) => prev.filter((f) => String(f.id) !== String(facilityId)));
+    }, []);
 
     const filteredHospitalAdmins = useMemo(() => {
         const list = users.filter((u) => u.role_id === 2);
         const q = normalizeVi(adminSearch.trim());
-        if (!q) {
-            return list;
-        }
-        return list.filter((u) => {
-            const emailMatch = normalizeVi(u.email).includes(q);
-            const fac = u.MedicalFacility?.name ? normalizeVi(u.MedicalFacility.name).includes(q) : false;
-            return emailMatch || fac;
+        const filtered = !q
+            ? list
+            : list.filter((u) => {
+                  const emailMatch = normalizeVi(u.email).includes(q);
+                  const fac = u.MedicalFacility?.name ? normalizeVi(u.MedicalFacility.name).includes(q) : false;
+                  return emailMatch || fac;
+              });
+        return [...filtered].sort((a, b) => {
+            const fa = normalizeVi(a.MedicalFacility?.name ?? "");
+            const fb = normalizeVi(b.MedicalFacility?.name ?? "");
+            if (fa !== fb) {
+                return fa.localeCompare(fb, "vi");
+            }
+            return normalizeVi(a.email).localeCompare(normalizeVi(b.email), "vi");
         });
     }, [users, adminSearch]);
+
+    const duplicateActiveAdminFacilities = useMemo(() => {
+        const counts = new Map<number, { name: string; count: number }>();
+        for (const u of users) {
+            if (u.role_id !== 2 || u.is_active === false || u.facility_id == null) {
+                continue;
+            }
+            const fid = Number(u.facility_id);
+            const prev = counts.get(fid);
+            const name = u.MedicalFacility?.name ?? `BV #${fid}`;
+            counts.set(fid, { name, count: (prev?.count ?? 0) + 1 });
+        }
+        return [...counts.entries()]
+            .filter(([, v]) => v.count > 1)
+            .map(([id, v]) => ({ facilityId: id, name: v.name, count: v.count }));
+    }, [users]);
 
     const pctActive =
         facilities.length === 0 ? 0 : Math.round((activeFacilityCount / facilities.length) * 1000) / 10;
@@ -210,9 +274,6 @@ export default function SuperAdminDashboardPage() {
     const closeFacilityModal = () => {
         setFacilityModalOpen(false);
         setFacilityModalIntent(null);
-        void loadData().catch(() => {
-            /* ignore */
-        });
     };
 
     const openFacilityModal = (intent: FacilityAdminModalIntent) => {
@@ -267,6 +328,12 @@ export default function SuperAdminDashboardPage() {
         }
         if (password.length < 8) {
             setCreateError("Mật khẩu tối thiểu 8 ký tự (theo chính sách hệ thống).");
+            return;
+        }
+        if (facilityIdsWithActiveAdmin.has(Number(facilityId))) {
+            setCreateError(
+                "Bệnh viện này đã có admin hoạt động. Vô hiệu admin cũ trước khi tạo mới, hoặc gán admin khác vào BV trống.",
+            );
             return;
         }
         try {
@@ -378,39 +445,26 @@ export default function SuperAdminDashboardPage() {
     };
 
     const handleLogout = () => {
-        clearSession();
+        logout();
         navigate("/login", { replace: true });
     };
 
     return (
-        <main className="min-h-dvh bg-slate-50 p-4 text-slate-900 sm:p-6 lg:p-8">
-            <div className="mx-auto max-w-[1200px] space-y-6">
-                <header className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                            <h1 className="text-2xl font-bold">Dashboard Quản trị toàn hệ thống</h1>
-                            <p className="mt-1 text-sm text-slate-600">
-                                Quản lý cơ sở y tế, tài khoản admin bệnh viện và theo dõi trạng thái hoạt động.
-                            </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <Link
-                                to="/user"
-                                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                            >
-                                Về trang chủ
-                            </Link>
-                            <button
-                                type="button"
-                                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                                onClick={handleLogout}
-                            >
-                                Đăng xuất
-                            </button>
-                        </div>
-                    </div>
-                </header>
-
+        <AppPageShell
+            title="Quản trị toàn hệ thống"
+            subtitle="Quản lý cơ sở y tế, tài khoản admin bệnh viện và trạng thái hoạt động"
+            maxWidthClass="max-w-[1200px]"
+            backTo={{ href: "/user", label: "Về trang chủ" }}
+            actions={
+                <button
+                    type="button"
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                    onClick={handleLogout}
+                >
+                    Đăng xuất
+                </button>
+            }
+        >
                 {pageError ? (
                     <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
                         {pageError}
@@ -418,17 +472,14 @@ export default function SuperAdminDashboardPage() {
                 ) : null}
 
                 <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                         <p className="text-sm text-slate-500">Tổng cơ sở y tế</p>
                         <p className="mt-1 text-2xl font-bold">{facilities.length}</p>
                         <p className="mt-2 text-xs text-slate-500">
                             Gồm cả cơ sở đang kích hoạt và đã tạm ngưng (soft delete).
                         </p>
-                        <p className="mt-1 text-xs font-medium text-slate-600">
-                            ↑ Xu hướng so sánh theo ngày/tuần: đang phát triển.
-                        </p>
                     </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                         <p className="text-sm text-slate-500">Đang kích hoạt</p>
                         <p className="mt-1 text-2xl font-bold text-emerald-700">{activeFacilityCount}</p>
                         <p className="mt-2 text-xs text-slate-500">
@@ -439,16 +490,14 @@ export default function SuperAdminDashboardPage() {
                                 ? `Tất cả ${facilities.length || 0} cơ sở đều đang kích hoạt (${pctActive}%).`
                                 : `${inactiveFacilityCount} cơ sở tạm ngưng — ${pctActive}% còn kích hoạt.`}
                         </p>
-                        <p className="mt-1 text-xs text-slate-400">↓ So với hôm qua: chưa có dữ liệu lịch sử.</p>
                     </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                         <p className="text-sm text-slate-500">Admin bệnh viện (hoạt động)</p>
                         <p className="mt-1 text-2xl font-bold">{activeHospitalAdminCount}</p>
                         <p className="mt-2 text-xs text-slate-500">
                             Tài khoản role Admin BV chưa bị vô hiệu hóa ({users.filter((u) => u.role_id === 2).length}{" "}
                             tổng nếu gồm đã khóa).
                         </p>
-                        <p className="mt-1 text-xs text-slate-400">= Không đổi theo tuần: tính năng trend đang lên kế hoạch.</p>
                     </div>
                 </section>
 
@@ -491,23 +540,35 @@ export default function SuperAdminDashboardPage() {
                         </div>
                         <div className="mt-4 min-h-0 flex-1 overflow-auto">
                             <table className="w-full text-sm">
-                                <thead className="sticky top-0 z-[1] bg-white text-left text-slate-500 shadow-sm">
+                                <thead className="sticky top-0 z-[1] bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                                     <tr>
-                                        <th className="py-2 pr-2">Tên cơ sở</th>
-                                        <th className="py-2 pr-2">Loại</th>
-                                        <th className="py-2 pr-2">Trạng thái</th>
-                                        <th className="py-2 text-right">Thao tác</th>
+                                        <th className="py-3 pr-2">Mã</th>
+                                        <th className="py-3 pr-2">Tên cơ sở</th>
+                                        <th className="py-3 pr-2">Loại</th>
+                                        <th className="py-3 pr-2">Trạng thái</th>
+                                        <th className="py-3 text-right">Thao tác</th>
                                     </tr>
                                 </thead>
                                 <tbody>
+                                    {filteredFacilities.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={5} className="py-8 text-center text-sm text-slate-500">
+                                                Không có cơ sở phù hợp bộ lọc.
+                                            </td>
+                                        </tr>
+                                    ) : null}
                                     {filteredFacilities.map((f) => (
                                         <Fragment key={String(f.id)}>
-                                            <tr className="border-t border-slate-100">
-                                                <td className="max-w-[200px] truncate py-2 pr-2 font-medium" title={f.name}>
-                                                    {f.name}
+                                            <tr className="border-t border-slate-100 transition-colors hover:bg-slate-50/80">
+                                                <td className="py-3 pr-2 font-mono text-xs text-slate-500">#{f.id}</td>
+                                                <td className="max-w-[200px] py-3 pr-2" title={f.name}>
+                                                    <div className="truncate font-semibold text-slate-900">{f.name}</div>
+                                                    {f.address ? (
+                                                        <div className="truncate text-xs text-slate-500">{f.address}</div>
+                                                    ) : null}
                                                 </td>
-                                                <td className="py-2 pr-2">{getFacilityTypeLabel(Number(f.type))}</td>
-                                                <td className="py-2 pr-2">
+                                                <td className="py-3 pr-2 text-slate-700">{getFacilityTypeLabel(Number(f.type))}</td>
+                                                <td className="py-3 pr-2">
                                                     {f.is_active === false ? (
                                                         <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">
                                                             Tạm ngưng
@@ -518,18 +579,18 @@ export default function SuperAdminDashboardPage() {
                                                         </span>
                                                     )}
                                                 </td>
-                                                <td className="py-2 text-right">
+                                                <td className="py-3 text-right">
                                                     <div className="flex flex-wrap justify-end gap-1">
                                                         <button
                                                             type="button"
-                                                            className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                                            className="rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
                                                             onClick={() => openFacilityModal({ mode: "edit", facilityId: f.id })}
                                                         >
                                                             Sửa
                                                         </button>
                                                         <button
                                                             type="button"
-                                                            className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                                            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                                                             onClick={() =>
                                                                 setExpandedFacilityId((cur) =>
                                                                     cur === f.id ? null : f.id,
@@ -543,7 +604,7 @@ export default function SuperAdminDashboardPage() {
                                             </tr>
                                             {expandedFacilityId === f.id ? (
                                                 <tr className="border-t border-slate-50 bg-slate-50/80">
-                                                    <td colSpan={4} className="px-2 py-3 text-xs text-slate-700">
+                                                    <td colSpan={5} className="px-3 py-3 text-xs text-slate-700">
                                                         <p>
                                                             <span className="font-semibold">Địa chỉ:</span>{" "}
                                                             {f.address || "—"}
@@ -578,7 +639,7 @@ export default function SuperAdminDashboardPage() {
                             </div>
                             <button
                                 type="button"
-                                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-slate-800"
+                                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500"
                                 onClick={openCreateAdminModal}
                             >
                                 + Tạo tài khoản Admin BV
@@ -596,14 +657,33 @@ export default function SuperAdminDashboardPage() {
                             />
                         </div>
 
+                        {duplicateActiveAdminFacilities.length > 0 ? (
+                            <div
+                                className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950"
+                                role="status"
+                            >
+                                <p className="font-semibold">Có bệnh viện gán nhiều admin đang hoạt động</p>
+                                <p className="mt-1 text-amber-900/90">
+                                    {duplicateActiveAdminFacilities
+                                        .slice(0, 4)
+                                        .map((d) => `${d.name} (${d.count} tài khoản)`)
+                                        .join(" · ")}
+                                    {duplicateActiveAdminFacilities.length > 4 ? " …" : ""}
+                                    . Vô hiệu bản trùng (giữ một admin/BV) hoặc chạy{" "}
+                                    <code className="rounded bg-amber-100 px-1">npm run db:reset</code> trong GeoBackend
+                                    để về seed sạch.
+                                </p>
+                            </div>
+                        ) : null}
+
                         <div className="mt-3 min-h-0 flex-1 overflow-auto">
                             <table className="w-full text-sm">
-                                <thead className="sticky top-0 z-[1] bg-white text-left text-slate-500 shadow-sm">
+                                <thead className="sticky top-0 z-[1] bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                                     <tr>
-                                        <th className="py-2 pr-2">Hiển thị</th>
-                                        <th className="py-2 pr-2">Vai trò</th>
-                                        <th className="py-2 pr-2">Cơ sở</th>
-                                        <th className="py-2 text-right">Thao tác</th>
+                                        <th className="py-3 pr-2">Tài khoản</th>
+                                        <th className="py-3 pr-2">Vai trò</th>
+                                        <th className="py-3 pr-2">Cơ sở gán</th>
+                                        <th className="py-3 text-right">Thao tác</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -612,11 +692,11 @@ export default function SuperAdminDashboardPage() {
                                         const facilityName = u.MedicalFacility?.name ?? "Chưa gán cơ sở";
                                         const active = u.is_active !== false;
                                         return (
-                                            <tr key={u.id} className="border-t border-slate-100">
-                                                <td className="py-2 pr-2">
-                                                    <div className="font-medium text-slate-900">{facilityName}</div>
-                                                    <div className="text-[11px] text-slate-500" title="Email đã ẩn trên màn hình">
-                                                        {masked}
+                                            <tr key={u.id} className="border-t border-slate-100 transition-colors hover:bg-slate-50/80">
+                                                <td className="py-3 pr-2">
+                                                    <div className="font-medium text-slate-900">{masked}</div>
+                                                    <div className="text-[11px] text-slate-500">
+                                                        #{u.id} · {facilityName}
                                                     </div>
                                                     {!active ? (
                                                         <span className="mt-1 inline-block rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-700">
@@ -624,15 +704,15 @@ export default function SuperAdminDashboardPage() {
                                                         </span>
                                                     ) : null}
                                                 </td>
-                                                <td className="py-2 pr-2">Admin BV</td>
-                                                <td className="max-w-[140px] truncate py-2 pr-2" title={facilityName}>
+                                                <td className="py-3 pr-2 text-slate-700">Admin BV</td>
+                                                <td className="max-w-[140px] truncate py-3 pr-2 text-slate-700" title={facilityName}>
                                                     {facilityName}
                                                 </td>
-                                                <td className="py-2 text-right">
+                                                <td className="py-3 text-right">
                                                     <div className="flex flex-wrap justify-end gap-1">
                                                         <button
                                                             type="button"
-                                                            className="rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100"
+                                                            className="rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
                                                             onClick={() => openEditAdminModal(u)}
                                                         >
                                                             Xem / Sửa
@@ -640,7 +720,7 @@ export default function SuperAdminDashboardPage() {
                                                         {active ? (
                                                             <button
                                                                 type="button"
-                                                                className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                                                className="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
                                                                 disabled={
                                                                     currentUserId != null && Number(currentUserId) === Number(u.id)
                                                                 }
@@ -664,172 +744,133 @@ export default function SuperAdminDashboardPage() {
                         </div>
                     </div>
                 </section>
-            </div>
 
-            {createAdminModalOpen ? (
-                <div
-                    className="fixed inset-0 z-[902] grid place-items-center bg-black/40 p-4"
-                    role="presentation"
-                    onClick={(e) => {
-                        if (e.target === e.currentTarget) closeCreateAdminModal();
-                    }}
-                >
-                    <div
-                        className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="create-admin-modal-title"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="flex items-start justify-between gap-4">
-                            <div>
-                                <h3 id="create-admin-modal-title" className="text-lg font-bold text-slate-900">
-                                    Tạo tài khoản Admin bệnh viện
-                                </h3>
-                                <p className="mt-1 text-xs text-slate-500">
-                                    Mỗi bệnh viện chỉ một admin hoạt động. Cơ sở đã có admin sẽ bị mờ trong danh sách chọn.
-                                </p>
-                            </div>
-                            <button
-                                type="button"
-                                className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                                onClick={closeCreateAdminModal}
-                            >
-                                Đóng
-                            </button>
-                        </div>
-
-                        <div className="mt-4 grid grid-cols-1 gap-3">
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-600" htmlFor="sa-admin-email">
-                                    Email đăng nhập
-                                </label>
-                                <input
-                                    id="sa-admin-email"
-                                    className={formControlFieldClassNameMt1}
-                                    placeholder="ten.admin@domain.com"
-                                    type="email"
-                                    autoComplete="off"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-600" htmlFor="sa-admin-password">
-                                    Mật khẩu
-                                </label>
-                                <input
-                                    id="sa-admin-password"
-                                    className={formControlFieldClassNameMt1}
-                                    placeholder="Tối thiểu 8 ký tự"
-                                    type="password"
-                                    autoComplete="new-password"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                />
-                                <p
-                                    className={`mt-1 text-[11px] font-medium ${
-                                        pwdHint.tone === "amber"
-                                            ? "text-amber-700"
-                                            : pwdHint.tone === "emerald"
-                                              ? "text-emerald-700"
-                                              : "text-slate-500"
-                                    }`}
-                                >
-                                    {pwdHint.label}
-                                </p>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-600" htmlFor="sa-admin-facility">
-                                    Bệnh viện
-                                </label>
-                                <select
-                                    id="sa-admin-facility"
-                                    className={formControlFieldClassNameMt1}
-                                    aria-label="Chọn bệnh viện cho admin"
-                                    value={facilityId === "" ? "" : String(facilityId)}
-                                    onChange={(e) => setFacilityId(e.target.value ? Number(e.target.value) : "")}
-                                >
-                                    <option value="">Chọn bệnh viện</option>
-                                    {hospitalFacilities.map((f) => {
-                                        const taken = facilityIdsWithActiveAdmin.has(Number(f.id));
-                                        return (
-                                            <option key={String(f.id)} value={String(f.id)} disabled={taken}>
-                                                {f.name}
-                                                {taken ? " — đã có admin" : ""}
-                                            </option>
-                                        );
-                                    })}
-                                </select>
-                            </div>
-                        </div>
-                        {createError ? (
-                            <p className="mt-3 text-sm font-medium text-red-600" role="alert">
-                                {createError}
-                            </p>
-                        ) : null}
-                        <div className="mt-5 flex flex-wrap justify-end gap-2">
-                            <button
-                                type="button"
-                                className="rounded-lg border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-200"
-                                onClick={closeCreateAdminModal}
-                                disabled={creating}
-                            >
-                                Hủy
-                            </button>
-                            <button
-                                type="button"
-                                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
-                                onClick={() => void createAdmin()}
-                                disabled={creating}
-                            >
-                                {creating ? "Đang tạo..." : "Tạo tài khoản"}
-                            </button>
-                        </div>
-                    </div>
+            <AppModal
+                open={createAdminModalOpen}
+                onClose={closeCreateAdminModal}
+                title="Tạo tài khoản Admin bệnh viện"
+                subtitle="Mỗi bệnh viện chỉ một admin hoạt động. Cơ sở đã có admin sẽ bị khóa trong danh sách chọn."
+                titleId="create-admin-modal-title"
+                zIndex={902}
+                closeDisabled={creating}
+                footer={
+                    <>
+                        <button type="button" className={btnSecondaryClass} onClick={closeCreateAdminModal} disabled={creating}>
+                            Hủy
+                        </button>
+                        <button
+                            type="button"
+                            className={btnPrimaryClass}
+                            onClick={() => void createAdmin()}
+                            disabled={creating}
+                        >
+                            {creating ? "Đang tạo..." : "Tạo tài khoản"}
+                        </button>
+                    </>
+                }
+            >
+                <div className="grid grid-cols-1 gap-3">
+                    <label>
+                        <span className="text-xs font-semibold text-slate-600">Email đăng nhập</span>
+                        <input
+                            id="sa-admin-email"
+                            className={formControlFieldClassNameMt1}
+                            placeholder="ten.admin@domain.com"
+                            type="email"
+                            autoComplete="off"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                        />
+                    </label>
+                    <label>
+                        <span className="text-xs font-semibold text-slate-600">Mật khẩu</span>
+                        <input
+                            id="sa-admin-password"
+                            className={formControlFieldClassNameMt1}
+                            placeholder="Tối thiểu 8 ký tự"
+                            type="password"
+                            autoComplete="new-password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                        />
+                        <p
+                            className={`mt-1 text-[11px] font-medium ${
+                                pwdHint.tone === "amber"
+                                    ? "text-amber-700"
+                                    : pwdHint.tone === "emerald"
+                                      ? "text-emerald-700"
+                                      : "text-slate-500"
+                            }`}
+                        >
+                            {pwdHint.label}
+                        </p>
+                    </label>
+                    <label>
+                        <span className="text-xs font-semibold text-slate-600">Bệnh viện</span>
+                        <select
+                            id="sa-admin-facility"
+                            className={formControlFieldClassNameMt1}
+                            aria-label="Chọn bệnh viện cho admin"
+                            value={facilityId === "" ? "" : String(facilityId)}
+                            onChange={(e) => setFacilityId(e.target.value ? Number(e.target.value) : "")}
+                        >
+                            <option value="">Chọn bệnh viện</option>
+                            {hospitalFacilities.map((f) => {
+                                const taken = facilityIdsWithActiveAdmin.has(Number(f.id));
+                                return (
+                                    <option key={String(f.id)} value={String(f.id)} disabled={taken}>
+                                        #{f.id} — {f.name}
+                                        {taken ? " (đã có admin)" : ""}
+                                    </option>
+                                );
+                            })}
+                        </select>
+                    </label>
                 </div>
-            ) : null}
+                {createError ? (
+                    <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700" role="alert">
+                        {createError}
+                    </p>
+                ) : null}
+            </AppModal>
 
-            {editAdminTarget ? (
-                <div
-                    className="fixed inset-0 z-[903] grid place-items-center bg-black/40 p-4"
-                    role="presentation"
-                    onClick={(e) => {
-                        if (e.target === e.currentTarget) closeEditAdminModal();
-                    }}
-                >
-                    <div
-                        className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="edit-admin-modal-title"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="flex items-start justify-between gap-4">
-                            <div>
-                                <h3 id="edit-admin-modal-title" className="text-lg font-bold text-slate-900">
-                                    Xem / sửa Admin BV
-                                </h3>
-                                <p className="mt-1 text-xs text-slate-500">
-                                    Email đầy đủ chỉ hiển thị tại đây. Mật khẩu cũ không đọc lại được từ CSDL; Super Admin chỉ có thể đặt mật mới và xem plaintext một lần (nút bên dưới), hoặc cập nhật im lặng qua ô mật + Lưu.
-                                </p>
-                            </div>
-                            <button
-                                type="button"
-                                className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                                onClick={closeEditAdminModal}
-                            >
-                                Đóng
-                            </button>
-                        </div>
+            <AppModal
+                open={Boolean(editAdminTarget)}
+                onClose={closeEditAdminModal}
+                title="Xem / sửa Admin bệnh viện"
+                subtitle="Email đầy đủ chỉ hiển thị tại đây. Mật khẩu mới chỉ xem được một lần sau khi đặt lại."
+                titleId="edit-admin-modal-title"
+                zIndex={903}
+                closeDisabled={editAdminSaving || resettingAdminPassword}
+                footer={
+                    <>
+                        <button
+                            type="button"
+                            className={btnSecondaryClass}
+                            onClick={closeEditAdminModal}
+                            disabled={editAdminSaving || resettingAdminPassword}
+                        >
+                            Hủy
+                        </button>
+                        <button
+                            type="button"
+                            className={btnPrimaryClass}
+                            onClick={() => void saveEditHospitalAdmin()}
+                            disabled={editAdminSaving || resettingAdminPassword}
+                        >
+                            {editAdminSaving ? "Đang lưu..." : "Lưu thay đổi"}
+                        </button>
+                    </>
+                }
+            >
+                {editAdminTarget?.is_active === false ? (
+                    <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+                        Tài khoản đang vô hiệu — vẫn có thể cập nhật email, bệnh viện gán hoặc đặt mật khẩu mới.
+                    </p>
+                ) : null}
 
-                        {editAdminTarget.is_active === false ? (
-                            <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
-                                Tài khoản đang vô hiệu — vẫn có thể cập nhật email, bệnh viện gán hoặc đặt mật khẩu mới.
-                            </p>
-                        ) : null}
-
-                        <div className="mt-4 grid grid-cols-1 gap-3">
+                {editAdminTarget ? (
+                        <div className="grid grid-cols-1 gap-3">
                             <div>
                                 <label className="block text-xs font-semibold text-slate-600" htmlFor="edit-admin-email">
                                     Email đăng nhập
@@ -905,8 +946,8 @@ export default function SuperAdminDashboardPage() {
                                         const taken = facilityTakenByOtherActiveAdmin(Number(f.id), editAdminTarget.id);
                                         return (
                                             <option key={String(f.id)} value={String(f.id)} disabled={taken}>
-                                                {f.name}
-                                                {taken ? " — đã có admin" : ""}
+                                                #{f.id} — {f.name}
+                                                {taken ? " (đã có admin)" : ""}
                                             </option>
                                         );
                                     })}
@@ -938,68 +979,60 @@ export default function SuperAdminDashboardPage() {
                                 </p>
                             </div>
                         </div>
-                        {editAdminError ? (
-                            <p className="mt-3 text-sm font-medium text-red-600" role="alert">
-                                {editAdminError}
-                            </p>
-                        ) : null}
-                        <div className="mt-5 flex flex-wrap justify-end gap-2">
-                            <button
-                                type="button"
-                                className="rounded-lg border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-200"
-                                onClick={closeEditAdminModal}
-                                disabled={editAdminSaving || resettingAdminPassword}
-                            >
-                                Hủy
-                            </button>
-                            <button
-                                type="button"
-                                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
-                                onClick={() => void saveEditHospitalAdmin()}
-                                disabled={editAdminSaving || resettingAdminPassword}
-                            >
-                                {editAdminSaving ? "Đang lưu..." : "Lưu"}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            ) : null}
+                ) : null}
+                {editAdminError ? (
+                    <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700" role="alert">
+                        {editAdminError}
+                    </p>
+                ) : null}
+            </AppModal>
 
-            <FacilityAdminModal open={facilityModalOpen} onClose={closeFacilityModal} openIntent={facilityModalIntent} />
+            <FacilityAdminModal
+                open={facilityModalOpen}
+                onClose={closeFacilityModal}
+                openIntent={facilityModalIntent}
+                onFacilitySaved={handleFacilitySaved}
+                onFacilityDeleted={handleFacilityDeleted}
+            />
 
-            {pendingDeactivateUser ? (
-                <div className="fixed inset-0 z-[950] grid place-items-center bg-black/45 p-4">
-                    <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
-                        <h3 className="text-lg font-bold text-slate-900">Vô hiệu tài khoản admin?</h3>
-                        <p className="mt-2 text-sm text-slate-600">
-                            Người dùng{" "}
-                            <span className="font-semibold text-slate-800">
-                                {pendingDeactivateUser.MedicalFacility?.name ?? "admin"}
-                            </span>{" "}
-                            ({maskEmailForDisplay(pendingDeactivateUser.email)}) sẽ không đăng nhập được nữa. Bạn có chắc
-                            không?
-                        </p>
-                        <div className="mt-5 flex justify-end gap-2">
-                            <button
-                                type="button"
-                                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                                onClick={() => setPendingDeactivateUser(null)}
-                                disabled={deactivating}
-                            >
-                                Hủy
-                            </button>
-                            <button
-                                type="button"
-                                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:bg-red-300"
-                                onClick={confirmDeactivateAdmin}
-                                disabled={deactivating}
-                            >
-                                {deactivating ? "Đang xử lý..." : "Vô hiệu hóa"}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            ) : null}
-        </main>
+            <AppModal
+                open={Boolean(pendingDeactivateUser)}
+                onClose={() => setPendingDeactivateUser(null)}
+                title="Vô hiệu tài khoản admin?"
+                subtitle="Hành động này không xóa dữ liệu — chỉ chặn đăng nhập."
+                zIndex={950}
+                closeDisabled={deactivating}
+                footer={
+                    <>
+                        <button
+                            type="button"
+                            className={btnSecondaryClass}
+                            onClick={() => setPendingDeactivateUser(null)}
+                            disabled={deactivating}
+                        >
+                            Hủy
+                        </button>
+                        <button
+                            type="button"
+                            className={btnDangerClass}
+                            onClick={() => void confirmDeactivateAdmin()}
+                            disabled={deactivating}
+                        >
+                            {deactivating ? "Đang xử lý..." : "Vô hiệu hóa"}
+                        </button>
+                    </>
+                }
+            >
+                {pendingDeactivateUser ? (
+                    <p className="text-sm text-slate-600">
+                        Người dùng{" "}
+                        <span className="font-semibold text-slate-900">
+                            {pendingDeactivateUser.MedicalFacility?.name ?? "admin"}
+                        </span>{" "}
+                        ({maskEmailForDisplay(pendingDeactivateUser.email)}) sẽ không đăng nhập được nữa. Bạn có chắc chắn?
+                    </p>
+                ) : null}
+            </AppModal>
+        </AppPageShell>
     );
 }

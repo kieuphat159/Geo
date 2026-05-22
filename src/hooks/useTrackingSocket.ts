@@ -48,8 +48,12 @@ function resolveTrackingSocketUrl(): string {
 export function useTrackingSocket({ requestId, enabled, trackingToken, onEvent }: UseTrackingSocketOptions): {
     connectionState: TrackingConnectionState;
     isReconnecting: boolean;
+    browserOnline: boolean;
 } {
     const [connectionState, setConnectionState] = useState<TrackingConnectionState>("idle");
+    const [browserOnline, setBrowserOnline] = useState(
+        typeof navigator !== "undefined" ? navigator.onLine : true,
+    );
 
     const socketRef = useRef<Socket | null>(null);
     const reconnectTimerRef = useRef<number | null>(null);
@@ -62,6 +66,7 @@ export function useTrackingSocket({ requestId, enabled, trackingToken, onEvent }
     useEffect(() => {
         if (!enabled || requestId === null || !onEvent) {
             setConnectionState("idle");
+            setBrowserOnline(typeof navigator !== "undefined" ? navigator.onLine : true);
             return;
         }
 
@@ -89,16 +94,31 @@ export function useTrackingSocket({ requestId, enabled, trackingToken, onEvent }
 
             const safeRequestId = requestId;
 
+            const joinRequestRoom = () => {
+                if (typeof trackingToken === "string" && trackingToken.trim()) {
+                    socket.emit("join_request_room", { requestId: safeRequestId, token: trackingToken });
+                    return;
+                }
+                socket.emit("error", "Missing tracking token");
+            };
+
             socket.on("connect", () => {
                 reconnectAttemptsRef.current = 0;
                 setConnectionState("connected");
+                joinRequestRoom();
+            });
 
-                if (typeof trackingToken === "string" && trackingToken.trim()) {
-                    socket.emit("join_request_room", { requestId: safeRequestId, token: trackingToken });
-                } else {
-                    // Without token we can't join request room.
-                    socket.emit("error", "Missing tracking token");
+            socket.on("sos_assigned", (payload: any) => {
+                const emergencyRequestId = payload?.request_id ?? safeRequestId;
+                if (Number(emergencyRequestId) !== safeRequestId) {
+                    return;
                 }
+
+                onEventRef.current({
+                    request_id: safeRequestId,
+                    status: "ASSIGNED",
+                    eta_minutes: payload?.eta_minutes,
+                });
             });
 
             socket.on("tracking_update", (payload: any) => {
@@ -142,14 +162,17 @@ export function useTrackingSocket({ requestId, enabled, trackingToken, onEvent }
             socket.io.on("reconnect", () => {
                 reconnectAttemptsRef.current = 0;
                 setConnectionState("connected");
+                joinRequestRoom();
             });
         };
 
         const handleOffline = () => {
+            setBrowserOnline(false);
             setConnectionState("reconnecting");
         };
 
         const handleOnline = () => {
+            setBrowserOnline(true);
             if (socketRef.current && !socketRef.current.connected) {
                 setConnectionState("connecting");
                 socketRef.current.connect();
@@ -178,6 +201,7 @@ export function useTrackingSocket({ requestId, enabled, trackingToken, onEvent }
 
     return {
         connectionState,
-        isReconnecting: connectionState === "reconnecting",
+        isReconnecting: connectionState === "reconnecting" || !browserOnline,
+        browserOnline,
     };
 }

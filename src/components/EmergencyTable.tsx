@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { EmergencyCase } from "../types/emergency";
+import { isWaitingForDispatch, normalizeEmergencyStatus } from "../utils/emergencyStatus";
 
 const dispatchSelectClass = `geo-form-control rounded-lg border border-slate-200 bg-white text-slate-900`;
 
@@ -53,6 +54,46 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
         return availableAmbulances[0] ? String(availableAmbulances[0].id) : "";
     };
 
+    const runDispatch = (rowId: string) => {
+        if (!onDispatch) return;
+        const id = Number(resolvePick(rowId));
+        if (!Number.isFinite(id) || id <= 0) return;
+        onDispatch(rowId, id);
+    };
+
+    const renderVehiclePicker = (rowId: string, compact?: boolean) => (
+        <div className={`flex flex-wrap items-center gap-2 ${compact ? "" : "min-w-[min(100%,320px)]"}`}>
+            <select
+                id={compact ? undefined : `amb-pick-${rowId}`}
+                className={`${compact ? "max-w-[140px]" : "min-w-[120px] flex-1"} px-2 py-1.5 text-xs font-medium ${dispatchSelectClass}`}
+                value={resolvePick(rowId)}
+                onChange={(e) => setPickByRow((p) => ({ ...p, [rowId]: e.target.value }))}
+                disabled={availableAmbulances.length === 0}
+                aria-label="Chọn xe cứu thương"
+            >
+                {availableAmbulances.length === 0 ? (
+                    <option value="">Không có xe</option>
+                ) : (
+                    availableAmbulances.map((a) => (
+                        <option key={String(a.id)} value={String(a.id)}>
+                            {a.plate_number}
+                        </option>
+                    ))
+                )}
+            </select>
+            {onDispatch ? (
+                <button
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    type="button"
+                    disabled={availableAmbulances.length === 0 || !resolvePick(rowId)}
+                    onClick={() => runDispatch(rowId)}
+                >
+                    Điều động
+                </button>
+            ) : null}
+        </div>
+    );
+
     const plateForAssigned = (row: EmergencyCase) =>
         row.assigned_ambulance_plate ??
         (row.assigned_ambulance_id != null
@@ -84,7 +125,10 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
     return (
         <div>
             <div className="space-y-4 md:hidden">
-                {rows.map((row) => (
+                {rows.map((row) => {
+                    const rowStatus = normalizeEmergencyStatus(row.status);
+                    const waiting = isWaitingForDispatch(rowStatus);
+                    return (
                     <article
                         key={row.id}
                         className="group overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all hover:shadow-md"
@@ -124,9 +168,9 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                             ) : null}
                             <div className="flex justify-between">
                                 <dt className="text-slate-500">Trạng thái:</dt>
-                                <dd className="font-medium text-slate-900">{statusTextMap[row.status]}</dd>
+                                <dd className="font-medium text-slate-900">{statusTextMap[rowStatus]}</dd>
                             </div>
-                            {row.status === "ASSIGNED" || row.status === "ON_THE_WAY" ? (
+                            {rowStatus === "ASSIGNED" || rowStatus === "ON_THE_WAY" ? (
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700">
                                     <span className="font-semibold">Xe: </span>
                                     {plateForAssigned(row) ?? `#${row.assigned_ambulance_id ?? "—"}`}
@@ -134,44 +178,14 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                             ) : null}
                         </dl>
 
-                        {row.status === "WAITING" && onDispatch ? (
-                            <div className="mt-4 space-y-2">
-                                <label className="block text-xs font-semibold text-slate-600" htmlFor={`amb-pick-${row.id}`}>
-                                    Chọn xe cứu thương
-                                </label>
-                                <select
-                                    id={`amb-pick-${row.id}`}
-                                    className={`w-full px-3 py-2 text-sm ${dispatchSelectClass}`}
-                                    value={resolvePick(row.id)}
-                                    onChange={(e) => setPickByRow((p) => ({ ...p, [row.id]: e.target.value }))}
-                                    disabled={availableAmbulances.length === 0}
-                                >
-                                    {availableAmbulances.length === 0 ? (
-                                        <option value="">Không có xe sẵn sàng</option>
-                                    ) : (
-                                        availableAmbulances.map((a) => (
-                                            <option key={String(a.id)} value={String(a.id)}>
-                                                {a.plate_number}
-                                            </option>
-                                        ))
-                                    )}
-                                </select>
-                                <button
-                                    className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50"
-                                    type="button"
-                                    disabled={availableAmbulances.length === 0 || !resolvePick(row.id)}
-                                    onClick={() => {
-                                        const id = Number(resolvePick(row.id));
-                                        if (!Number.isFinite(id)) return;
-                                        onDispatch(row.id, id);
-                                    }}
-                                >
-                                    Điều động xe đã chọn
-                                </button>
+                        {waiting && onDispatch ? (
+                            <div className="mt-4">
+                                <p className="mb-2 text-xs font-semibold text-slate-600">Chọn xe và điều động</p>
+                                {renderVehiclePicker(row.id)}
                             </div>
                         ) : null}
 
-                        {row.status === "ON_THE_WAY" && onArrived && onComplete ? (
+                        {(rowStatus === "ASSIGNED" || rowStatus === "ON_THE_WAY") && onArrived && onComplete ? (
                             <div className="mt-4 flex flex-col gap-2">
                                 <button
                                     className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500"
@@ -190,7 +204,7 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                             </div>
                         ) : null}
 
-                        {row.status === "ARRIVED" && onComplete ? (
+                        {rowStatus === "ARRIVED" && onComplete ? (
                             <button
                                 className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600"
                                 type="button"
@@ -200,19 +214,20 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                             </button>
                         ) : null}
 
-                        {row.status === "ASSIGNED" ? (
+                        {rowStatus === "ASSIGNED" ? (
                             <p className="mt-3 text-center text-xs text-slate-500">Đã điều xe — chờ cập nhật di chuyển / theo dõi.</p>
                         ) : null}
 
-                        {row.status === "COMPLETED" ? (
+                        {rowStatus === "COMPLETED" ? (
                             <p className="mt-3 text-center text-xs font-medium text-slate-500">Ca đã hoàn thành</p>
                         ) : null}
                     </article>
-                ))}
+                    );
+                })}
             </div>
 
-            <div className="hidden overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:block">
-                <table className="w-full min-w-[1020px] border-collapse text-sm">
+            <div className="hidden overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm md:block">
+                <table className="w-full min-w-[960px] border-collapse text-sm">
                     <thead>
                         <tr className="border-b border-slate-200 bg-slate-50/50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                             <th className="px-5 py-4">Mã ca</th>
@@ -222,11 +237,14 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                             <th className="truncate px-5 py-4">Cách</th>
                             <th className="px-5 py-4">Trạng thái</th>
                             <th className="px-5 py-4">Xe</th>
-                            <th className="px-5 py-4 text-right">Thao tác</th>
+                            <th className="sticky right-0 z-[2] bg-slate-50/95 px-5 py-4 text-right backdrop-blur-sm">Thao tác</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {rows.map((row) => (
+                        {rows.map((row) => {
+                            const rowStatus = normalizeEmergencyStatus(row.status);
+                            const waiting = isWaitingForDispatch(rowStatus);
+                            return (
                             <tr key={row.id} className="group bg-white transition-colors hover:bg-slate-50/80">
                                 <td className="px-5 py-4 font-semibold text-slate-900">{row.id}</td>
                                 <td className="whitespace-nowrap px-5 py-4 text-slate-600">{row.createdAt}</td>
@@ -254,50 +272,19 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                                     ) : null}
                                 </td>
                                 <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-600">{row.distanceKm.toFixed(1)} km</td>
-                                <td className="whitespace-nowrap px-5 py-4 text-slate-600">{statusTextMap[row.status]}</td>
-                                <td className="px-5 py-4 text-slate-700">
-                                    {row.status === "WAITING" && onDispatch ? (
-                                        <select
-                                            className={`max-w-[140px] px-2 py-1.5 text-xs font-medium ${dispatchSelectClass}`}
-                                            value={resolvePick(row.id)}
-                                            onChange={(e) => setPickByRow((p) => ({ ...p, [row.id]: e.target.value }))}
-                                            disabled={availableAmbulances.length === 0}
-                                            aria-label="Chọn xe cứu thương"
-                                        >
-                                            {availableAmbulances.length === 0 ? (
-                                                <option value="">Không có xe</option>
-                                            ) : (
-                                                availableAmbulances.map((a) => (
-                                                    <option key={String(a.id)} value={String(a.id)}>
-                                                        {a.plate_number}
-                                                    </option>
-                                                ))
-                                            )}
-                                        </select>
+                                <td className="whitespace-nowrap px-5 py-4 text-slate-600">{statusTextMap[rowStatus]}</td>
+                                <td className="min-w-[280px] px-5 py-4 text-slate-700">
+                                    {waiting && onDispatch ? (
+                                        renderVehiclePicker(row.id, true)
                                     ) : (
                                         <span className="text-xs font-medium">
                                             {plateForAssigned(row) ?? (row.assigned_ambulance_id ? `#${row.assigned_ambulance_id}` : "—")}
                                         </span>
                                     )}
                                 </td>
-                                <td className="px-5 py-4 text-right">
+                                <td className="sticky right-0 z-[1] bg-white px-5 py-4 text-right group-hover:bg-slate-50/80">
                                     <div className="inline-flex flex-wrap items-center justify-end gap-2">
-                                        {row.status === "WAITING" && onDispatch ? (
-                                            <button
-                                                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                                                type="button"
-                                                disabled={availableAmbulances.length === 0 || !resolvePick(row.id)}
-                                                onClick={() => {
-                                                    const id = Number(resolvePick(row.id));
-                                                    if (!Number.isFinite(id)) return;
-                                                    onDispatch(row.id, id);
-                                                }}
-                                            >
-                                                Điều động
-                                            </button>
-                                        ) : null}
-
-                                        {row.status === "ON_THE_WAY" && onArrived && onComplete ? (
+                                        {(rowStatus === "ASSIGNED" || rowStatus === "ON_THE_WAY") && onArrived && onComplete ? (
                                             <>
                                                 <button
                                                     className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-500"
@@ -316,7 +303,7 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                                             </>
                                         ) : null}
 
-                                        {row.status === "ARRIVED" && onComplete ? (
+                                        {rowStatus === "ARRIVED" && onComplete ? (
                                             <button
                                                 className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-600"
                                                 type="button"
@@ -326,7 +313,7 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                                             </button>
                                         ) : null}
 
-                                        {row.status === "COMPLETED" ? (
+                                        {rowStatus === "COMPLETED" ? (
                                             <button
                                                 className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-500 ring-1 ring-inset ring-slate-200 shadow-sm"
                                                 type="button"
@@ -338,7 +325,8 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                                     </div>
                                 </td>
                             </tr>
-                        ))}
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>

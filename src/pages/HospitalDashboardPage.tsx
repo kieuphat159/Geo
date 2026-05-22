@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { io, type Socket } from "socket.io-client";
+import AppPageShell from "../components/AppPageShell";
 import AdminDispatchMap from "../components/AdminDispatchMap";
 import EmergencyTable from "../components/EmergencyTable";
+import { formControlFieldClassName } from "../constants/formClasses";
 import * as adminApi from "../services/adminApi";
+import { getStoredSession } from "../services/auth";
 import type { EmergencyCase } from "../types/emergency";
+import {
+  dedupeAmbulancesByPlate,
+  isValidAmbulancePlate,
+  normalizeAmbulancePlate,
+} from "../utils/ambulancePlate";
+import { normalizeEmergencyRows } from "../utils/emergencyStatus";
 
 const HCMC_CENTER: [number, number] = [10.7769, 106.7009];
 
@@ -14,12 +22,17 @@ export default function HospitalDashboardPage() {
   const [showAlert, setShowAlert] = useState(false);
 
   const [ambulances, setAmbulances] = useState<any[]>([]);
+  const [newPlate, setNewPlate] = useState("");
+  const [ambulanceFormError, setAmbulanceFormError] = useState<string | null>(null);
+  const [ambulanceSaving, setAmbulanceSaving] = useState(false);
   const [focusPosition, setFocusPosition] = useState<[number, number] | null>(null);
+  const facilityId = getStoredSession()?.user?.facility_id ?? null;
   const [ambulancePositionsByRequest, setAmbulancePositionsByRequest] = useState<Record<number, [number, number]>>({});
 
   const socketRef = useRef<Socket | null>(null);
   const joinedRequestIdsRef = useRef<Set<number>>(new Set());
   const emergenciesRef = useRef<any[]>([]);
+  const lastSosFocusRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
 
   useEffect(() => {
     emergenciesRef.current = emergencies;
@@ -92,8 +105,8 @@ export default function HospitalDashboardPage() {
   );
 
   const refreshEmergencies = useCallback(async (signal?: AbortSignal) => {
-    const rows = await adminApi.fetchEmergencies(signal);
-    setEmergencies(rows || []);
+    const rows = normalizeEmergencyRows((await adminApi.fetchEmergencies(signal)) || []);
+    setEmergencies(rows);
     if (socketRef.current) {
       joinRequestRooms(socketRef.current, rows || []);
     }
@@ -122,7 +135,7 @@ export default function HospitalDashboardPage() {
         }
         await refreshEmergencies();
         const updatedAmbulances = await adminApi.fetchAmbulances();
-        setAmbulances(updatedAmbulances || []);
+        setAmbulances(dedupeAmbulancesByPlate(updatedAmbulances || []));
         setPollError(null);
       } catch {
         setPollError("Không thể điều động xe cho ca cấp cứu");
@@ -134,11 +147,71 @@ export default function HospitalDashboardPage() {
   const reloadAmbulances = useCallback(async () => {
     try {
       const rows = await adminApi.fetchAmbulances();
-      setAmbulances(rows || []);
+      setAmbulances(dedupeAmbulancesByPlate(rows || []));
     } catch {
       // ignore
     }
   }, []);
+
+  const handleAddAmbulance = useCallback(async () => {
+    const plate = normalizeAmbulancePlate(newPlate);
+    if (!plate) {
+      setAmbulanceFormError("Nhập biển số xe cứu thương.");
+      return;
+    }
+    if (!isValidAmbulancePlate(plate)) {
+      setAmbulanceFormError("Biển số không hợp lệ (4–20 ký tự, chữ/số và dấu «-», ví dụ 59H-CR-06).");
+      return;
+    }
+    if (facilityId == null || !Number.isFinite(Number(facilityId))) {
+      setAmbulanceFormError("Tài khoản chưa gắn bệnh viện — không thể thêm xe.");
+      return;
+    }
+
+    const duplicateLocal = ambulances.some(
+      (a) => normalizeAmbulancePlate(String(a.plate_number ?? "")) === plate,
+    );
+    if (duplicateLocal) {
+      setAmbulanceFormError(`Biển số ${plate} đã có trong đội xe — không thể thêm trùng.`);
+      return;
+    }
+
+    setAmbulanceSaving(true);
+    setAmbulanceFormError(null);
+    try {
+      await adminApi.createAmbulance({ plate_number: plate, facility_id: Number(facilityId) });
+      setNewPlate("");
+      await reloadAmbulances();
+    } catch (e) {
+      setAmbulanceFormError(e instanceof Error ? e.message : "Không thể thêm xe cứu thương");
+    } finally {
+      setAmbulanceSaving(false);
+    }
+  }, [ambulances, facilityId, newPlate, reloadAmbulances]);
+
+  const handleSetAmbulanceMaintenance = useCallback(
+    async (ambulanceId: number) => {
+      try {
+        await adminApi.updateAmbulanceStatus(ambulanceId, "maintenance");
+        await reloadAmbulances();
+      } catch {
+        setAmbulanceFormError("Không thể cập nhật trạng thái xe");
+      }
+    },
+    [reloadAmbulances],
+  );
+
+  const handleSetAmbulanceAvailable = useCallback(
+    async (ambulanceId: number) => {
+      try {
+        await adminApi.updateAmbulanceStatus(ambulanceId, "available");
+        await reloadAmbulances();
+      } catch {
+        setAmbulanceFormError("Không thể cập nhật trạng thái xe");
+      }
+    },
+    [reloadAmbulances],
+  );
 
   const ambulanceStatusUi = (status: string) => {
     const s = String(status).toLowerCase();
@@ -205,7 +278,7 @@ export default function HospitalDashboardPage() {
       .fetchAmbulances()
       .then((rows) => {
         if (!mounted) return;
-        setAmbulances(rows || []);
+        setAmbulances(dedupeAmbulancesByPlate(rows || []));
       })
       .catch(() => {
         // ignore
@@ -222,7 +295,11 @@ export default function HospitalDashboardPage() {
     socketRef.current = socket;
 
     socket.on("connect", () => {
-      socket.emit("join-role-room", { role_id: 2 });
+      const facilityId = getStoredSession()?.user?.facility_id;
+      socket.emit("join-role-room", {
+        role_id: 2,
+        ...(facilityId != null ? { facility_id: facilityId } : {}),
+      });
       joinRequestRooms(socket, emergenciesRef.current);
     });
 
@@ -230,6 +307,17 @@ export default function HospitalDashboardPage() {
       const lat = payload?.lat;
       const lng = payload?.lng;
       if (typeof lat !== "number" || typeof lng !== "number") return;
+      const now = Date.now();
+      const prev = lastSosFocusRef.current;
+      if (
+        prev &&
+        Math.abs(prev.lat - lat) < 0.00001 &&
+        Math.abs(prev.lng - lng) < 0.00001 &&
+        now - prev.at < 30_000
+      ) {
+        return;
+      }
+      lastSosFocusRef.current = { lat, lng, at: now };
       setFocusPosition([lat, lng]);
       setShowAlert(true);
       playBeep();
@@ -276,32 +364,26 @@ export default function HospitalDashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [joinRequestRooms, playBeep, refreshEmergencies, reloadAmbulances, resolveSocketUrl]);
 
-  return (
-    <main className="min-h-dvh bg-slate-50 p-4 font-sans text-slate-900 sm:p-6 lg:p-8">
-      <div className="mx-auto max-w-[1600px] space-y-6">
-        <header className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-6 w-6">
-                <path fillRule="evenodd" d="M11.622 1.602a.73.73 0 01.756 0l2.25 1.313a.75.75 0 00.756 0l2.25-1.313a.73.73 0 01.756 0l2.25 1.313c.225.131.531.131.756 0l2.25-1.313a.73.73 0 01.756 0l2.25 1.313c.225.131.531.131.756 0l2.25-1.313a.73.73 0 01.756 0l2.25 1.313c.225.131.531.131.756 0a.75.75 0 000 1.313l-2.25 1.313a.73.73 0 01-.756 0l-2.25-1.313a.75.75 0 00-.756 0l-2.25 1.313a.73.73 0 01-.756 0l-2.25-1.313a.75.75 0 00-.756 0l-2.25 1.313a.73.73 0 01-.756 0l-2.25-1.313a.75.75 0 00-.756 0l-2.25 1.313a.73.73 0 01-.756 0L.988 2.915a.75.75 0 00-.756 0L1.622 1.602zM12 4.5a3 3 0 100 6 3 3 0 000-6z" clipRule="evenodd" />
-              </svg>
-            </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">Trung tâm điều phối</h1>
-              <p className="mt-0.5 text-sm text-slate-500">Màn hình chờ nhận và điều phối xe cấp cứu</p>
-            </div>
-          </div>
-            <Link
-              className="inline-flex max-w-max items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-slate-800 active:scale-95"
-              to="/user"
-            >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-              <path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" />
-            </svg>
-            ← Về bản đồ khẩn cấp
-          </Link>
-        </header>
+  // Avoid stale map focus when user switches browser tabs.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        setFocusPosition(null);
+      }
+    };
 
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  return (
+    <AppPageShell
+      title="Trung tâm điều phối"
+      subtitle="Màn hình nhận ca SOS và điều phối xe cứu thương"
+      backTo={{ href: "/user", label: "Về bản đồ khẩn cấp" }}
+    >
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.5fr_1fr] xl:grid-cols-[1.8fr_1fr]">
           <section className="lg:col-span-2 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -327,22 +409,77 @@ export default function HospitalDashboardPage() {
                 </p>
               </div>
             </div>
+            <form
+              className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleAddAmbulance();
+              }}
+            >
+              <label className="flex-1">
+                <span className="text-xs font-semibold text-slate-600">Thêm xe mới (biển số)</span>
+                <input
+                  className={`mt-1 ${formControlFieldClassName}`}
+                  value={newPlate}
+                  onChange={(e) => {
+                    setNewPlate(e.target.value);
+                    if (ambulanceFormError) setAmbulanceFormError(null);
+                  }}
+                  placeholder="VD: 59H-CR-06"
+                  disabled={ambulanceSaving}
+                  aria-invalid={ambulanceFormError != null ? "true" : "false"}
+                  autoComplete="off"
+                />
+                <span className="mt-1 block text-[11px] text-slate-500">
+                  Biển số không trùng trong toàn hệ thống (không thêm lại 59H-CR-01 … 05 đã có).
+                </span>
+              </label>
+              <button
+                type="submit"
+                className="h-10 shrink-0 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+                disabled={ambulanceSaving}
+              >
+                {ambulanceSaving ? "Đang lưu..." : "Thêm xe"}
+              </button>
+            </form>
+            {ambulanceFormError ? (
+              <p className="mt-2 text-sm font-medium text-red-600" role="alert">
+                {ambulanceFormError}
+              </p>
+            ) : null}
             {ambulances.length === 0 ? (
               <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                Chưa có xe trong hệ thống cho BV này. Chạy seed:{" "}
-                <code className="rounded bg-white px-1 py-0.5 text-xs">npx sequelize-cli db:seed --seed 20260406000003-seed-ambulances.js</code>
+                Chưa có xe — thêm biển số ở trên hoặc chạy seed ambulances cho môi trường dev.
               </p>
             ) : (
               <ul className="mt-4 flex flex-wrap gap-2">
                 {ambulances.map((a: any) => {
                   const ui = ambulanceStatusUi(String(a.status));
+                  const status = String(a.status).toLowerCase();
                   return (
                     <li
                       key={String(a.id)}
-                      className={`min-w-[140px] rounded-xl border px-3 py-2 shadow-sm ${ui.cls}`}
+                      className={`min-w-[160px] rounded-xl border px-3 py-2 shadow-sm ${ui.cls}`}
                     >
                       <p className="font-mono text-sm font-bold tracking-tight">{a.plate_number}</p>
                       <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-wide opacity-90">{ui.label}</p>
+                      {status === "maintenance" ? (
+                        <button
+                          type="button"
+                          className="mt-2 text-[11px] font-semibold text-emerald-800 underline"
+                          onClick={() => void handleSetAmbulanceAvailable(Number(a.id))}
+                        >
+                          Đưa về sẵn sàng
+                        </button>
+                      ) : status === "available" ? (
+                        <button
+                          type="button"
+                          className="mt-2 text-[11px] font-semibold text-slate-700 underline"
+                          onClick={() => void handleSetAmbulanceMaintenance(Number(a.id))}
+                        >
+                          Bảo trì
+                        </button>
+                      ) : null}
                     </li>
                   );
                 })}
@@ -350,12 +487,12 @@ export default function HospitalDashboardPage() {
             )}
           </section>
 
-          <section className="flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <section className="flex flex-col rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-100 bg-white px-6 py-5">
               <h2 className="text-lg font-bold tracking-tight text-slate-900">Danh sách ca cấp cứu</h2>
               <p className="mt-1 text-sm text-slate-500">Các yêu cầu đang chờ phản hồi từ trung tâm</p>
             </div>
-            <div className="bg-slate-50/30 p-6 flex-1">
+            <div className="flex-1 overflow-x-auto bg-slate-50/30 p-6">
               {pollError ? <div className="text-red-600">{pollError}</div> : null}
               <EmergencyTable
                 rows={emergencies}
@@ -386,12 +523,19 @@ export default function HospitalDashboardPage() {
             </div>
           </section>
         </div>
-      </div>
       {showAlert ? (
-        <div className="fixed right-6 top-6 z-[950] rounded-xl bg-red-600 px-4 py-3 text-white shadow-lg">
+        <div className="pointer-events-auto fixed right-6 top-6 z-[950] max-w-[min(320px,calc(100%-3rem))] rounded-xl bg-red-600 py-3 pl-4 pr-10 text-white shadow-lg">
+          <button
+            className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-md text-white/80 hover:bg-white/20 hover:text-white"
+            type="button"
+            aria-label="Đóng thông báo"
+            onClick={() => setShowAlert(false)}
+          >
+            ×
+          </button>
           <strong>Có ca cấp cứu mới đang chờ xử lý</strong>
         </div>
       ) : null}
-    </main>
+    </AppPageShell>
   );
 }

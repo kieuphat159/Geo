@@ -7,11 +7,12 @@ import { guestStrings } from "../constants/guestStrings";
 import { telHrefFromDisplay } from "../utils/phone";
 
 interface MapViewportControllerProps {
-    mode: "browse" | "tracking" | "completed";
+    mode: "browse" | "awaiting_dispatch" | "tracking" | "completed";
     defaultCenter: [number, number];
     userPosition: [number, number] | null;
     sosPosition: [number, number] | null;
     hospitalPosition: [number, number] | null;
+    trackingFocusNonce?: number;
     layoutSignature?: string;
 }
 
@@ -21,13 +22,20 @@ function MapViewportController({
     userPosition,
     sosPosition,
     hospitalPosition,
+    trackingFocusNonce,
     layoutSignature,
 }: MapViewportControllerProps) {
     const map = useMap();
     const hasFittedTrackingRef = useRef(false);
 
     useEffect(() => {
-        if (mode !== "tracking") {
+        if (mode === "tracking" || mode === "awaiting_dispatch") {
+            hasFittedTrackingRef.current = false;
+        }
+    }, [mode, trackingFocusNonce]);
+
+    useEffect(() => {
+        if (mode !== "tracking" && mode !== "awaiting_dispatch") {
             hasFittedTrackingRef.current = false;
 
             if (userPosition) {
@@ -63,7 +71,7 @@ function MapViewportController({
             map.flyTo(sosPosition, 15, { duration: 0.9 });
             hasFittedTrackingRef.current = true;
         }
-    }, [defaultCenter, hospitalPosition, map, mode, sosPosition, userPosition]);
+    }, [defaultCenter, hospitalPosition, map, mode, sosPosition, trackingFocusNonce, userPosition]);
 
     useEffect(() => {
         const invalidate = () => {
@@ -95,7 +103,7 @@ function MapViewportController({
 
 interface VietnamMapProps {
     defaultCenter: [number, number];
-    mode: "browse" | "tracking" | "completed";
+    mode: "browse" | "awaiting_dispatch" | "tracking" | "completed";
     currentPosition: [number, number] | null;
     facilities: Facility[];
     selectedFacilityId: string | number | null;
@@ -106,6 +114,7 @@ interface VietnamMapProps {
     assignedHospital: AssignedHospital | null;
     ambulancePosition: [number, number] | null;
     routePath: [number, number][];
+    trackingFocusNonce?: number;
     layoutSignature?: string;
 }
 
@@ -122,6 +131,7 @@ export default function VietnamMap({
     assignedHospital,
     ambulancePosition,
     routePath,
+    trackingFocusNonce,
     layoutSignature,
 }: VietnamMapProps) {
     const hospitalPosition: [number, number] | null = assignedHospital
@@ -173,6 +183,7 @@ export default function VietnamMap({
                 userPosition={currentPosition}
                 sosPosition={sosPosition}
                 hospitalPosition={hospitalPosition}
+                trackingFocusNonce={trackingFocusNonce}
                 layoutSignature={layoutSignature}
             />
 
@@ -248,7 +259,9 @@ export default function VietnamMap({
             {currentPosition ? <Marker position={currentPosition} icon={userLocationIcon} /> : null}
             {sosPosition ? <Marker position={sosPosition} icon={sosPulseIcon} /> : null}
             {hospitalPosition ? <Marker position={hospitalPosition} icon={hospitalIcon} /> : null}
-            {ambulancePosition ? <Marker position={ambulancePosition} icon={ambulanceIcon} /> : null}
+            {mode === "tracking" && ambulancePosition ? (
+                <Marker position={ambulancePosition} icon={ambulanceIcon} />
+            ) : null}
 
             {routePath.length >= 2 ? (
                 <Polyline

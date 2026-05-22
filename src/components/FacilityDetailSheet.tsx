@@ -83,7 +83,7 @@ export default function FacilityDetailSheet({
     const containerClassName =
         variant === "panel"
             ? "pointer-events-auto rounded-2xl border border-violet-100 bg-white p-4 shadow-sm"
-            : "pointer-events-auto absolute bottom-[max(6.75rem,calc(5.75rem+env(safe-area-inset-bottom)))] left-1/2 z-[1050] w-[calc(100%-1rem)] max-w-[430px] -translate-x-1/2 rounded-3xl border border-violet-100 bg-white/95 p-4 shadow-xl shadow-violet-950/20 backdrop-blur md:bottom-0 md:left-0 md:top-0 md:h-dvh md:w-[320px] md:max-w-none md:translate-x-0 md:rounded-none md:rounded-r-3xl md:border-r md:border-violet-100 md:bg-white/80 md:pt-[max(1rem,env(safe-area-inset-top))] md:pb-[max(1rem,env(safe-area-inset-bottom))] md:backdrop-blur-xl md:overflow-y-auto lg:hidden";
+            : "pointer-events-auto absolute bottom-[max(6.75rem,calc(5.75rem+env(safe-area-inset-bottom)))] left-1/2 z-[1050] w-[calc(100%-1rem)] max-w-[min(100%,28rem)] -translate-x-1/2 rounded-3xl border border-violet-100 bg-white/95 p-4 shadow-xl shadow-violet-950/20 backdrop-blur sm:max-w-[32rem] md:hidden";
 
     return (
         <section className={containerClassName} aria-label={guestStrings.detailTitle}>

@@ -548,6 +548,8 @@ export async function sendEmergencySos(payload: SosRequestPayload): Promise<SosR
 
     return {
         request_id: requestId,
+        session_token:
+            (data.session_token as string | undefined) ?? (data.sessionToken as string | undefined),
         assigned_hospital: parseAssignedHospital(data.assigned_hospital ?? data.hospital),
         route_path: normalizeRoutePath(data.route_path ?? data.routePath),
         eta_minutes: toNumber(data.eta_minutes ?? data.etaMinutes),

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { MapContainer, Marker, ScaleControl, TileLayer, useMap, ZoomControl } from "react-leaflet";
 import type { LatLngExpression } from "leaflet";
 import { ambulanceIcon, sosPulseIcon } from "../utils/mapIcons";
@@ -17,12 +17,29 @@ interface AdminDispatchMapProps {
   layoutSignature?: string;
 }
 
-function MapFlyToOnFocus({ position }: { position: [number, number] | null }) {
+function MapFlyToOnFocus({
+  position,
+  defaultCenter,
+}: {
+  position: [number, number] | null;
+  defaultCenter: LatLngExpression;
+}) {
   const map = useMap();
+  const hadFocusedRef = useRef(false);
   useEffect(() => {
-    if (!position) return;
-    map.flyTo(position, 15, { duration: 0.9 });
-  }, [map, position]);
+    if (position) {
+      hadFocusedRef.current = true;
+      map.flyTo(position, 15, { duration: 0.9 });
+      return;
+    }
+
+    if (!hadFocusedRef.current) {
+      return;
+    }
+
+    hadFocusedRef.current = false;
+    map.flyTo(defaultCenter, 13, { duration: 0.8 });
+  }, [defaultCenter, map, position]);
 
   return null;
 }
@@ -51,7 +68,7 @@ export default function AdminDispatchMap({
       <ZoomControl position="topright" />
       <ScaleControl position="bottomleft" />
 
-      <MapFlyToOnFocus position={focusPosition} />
+      <MapFlyToOnFocus position={focusPosition} defaultCenter={defaultCenter} />
 
       {patientMarkers.map((m) => (
         <Marker key={m.requestId} position={[m.lat, m.lng]} icon={sosPulseIcon}>

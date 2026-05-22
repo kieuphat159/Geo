@@ -1,6 +1,6 @@
 /**
- * Ẩn bớt email trên UI (dashboard admin) để giảm lộ thông tin tài khoản nội bộ.
- * Ví dụ: admin.cho-ray@geobackend.com → adm***@ge***.com
+ * Ẩn bớt email trên UI (dashboard admin) nhưng vẫn phân biệt được các tài khoản seed/test.
+ * admin.cho-ray@geobackend.com → a***.cho-ray@ge***.com (không gộp thành adm***@ge***.com)
  */
 export function maskEmailForDisplay(email: string): string {
     const trimmed = email.trim();
@@ -15,11 +15,24 @@ export function maskEmailForDisplay(email: string): string {
         return "•••";
     }
 
-    const localHead = local.slice(0, Math.min(3, local.length));
     const dot = domain.lastIndexOf(".");
     const tld = dot >= 0 ? domain.slice(dot) : "";
     const host = dot >= 0 ? domain.slice(0, dot) : domain;
     const hostHead = host.slice(0, Math.min(2, host.length));
+    const domainMasked = `${hostHead}***${tld}`;
 
-    return `${localHead}***@${hostHead}***${tld}`;
+    const adminSlug = /^admin\.(.+)$/i.exec(local);
+    if (adminSlug && adminSlug[1].length > 0) {
+        const slug = adminSlug[1];
+        const slugShown = slug.length > 14 ? `${slug.slice(0, 6)}…${slug.slice(-6)}` : slug;
+        return `a***.${slugShown}@${domainMasked}`;
+    }
+
+    const localHead = local.slice(0, Math.min(3, local.length));
+    const localTail = local.length > 5 ? local.slice(-3) : "";
+    if (localTail && local.length > 6) {
+        return `${localHead}***${localTail}@${domainMasked}`;
+    }
+
+    return `${localHead}***@${domainMasked}`;
 }

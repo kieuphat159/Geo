@@ -4,6 +4,10 @@
 
 export const guestStrings = {
     facilityPanelTitle: "Cơ sở y tế gần bạn",
+    facilityPanelCloseLabel: "Đóng",
+    facilityPanelCloseMapAria: "Đóng danh sách — xem bản đồ",
+    facilityPanelOpenListLabel: "Xem danh sách",
+    facilityPanelCompactHint: "Chạm để mở bộ lọc và danh sách cơ sở",
     searchPlaceholder: "Tìm theo tên cơ sở...",
     radiusLabel: "Bán kính tìm kiếm",
     loadingFacilities: "Đang tải danh sách cơ sở...",
@@ -39,6 +43,9 @@ export const guestStrings = {
     locationRequesting: "Đang xác định vị trí GPS...",
     locationReady: "Đã cập nhật vị trí hiện tại.",
     locationDenied: "Cần cấp quyền GPS để sử dụng tính năng này.",
+    locationDeniedPromptHint: "Bấm «Thử lại» và chọn Cho phép khi trình duyệt hỏi quyền vị trí.",
+    locationDeniedSettingsHint:
+        "Nếu không thấy hộp thoại: bấm biểu tượng khóa hoặc tên trang trên thanh địa chỉ → Vị trí → Cho phép, rồi bấm «Thử lại».",
     locationFailed: "Không thể lấy vị trí. Vui lòng thử lại.",
     locationOutsideSupportedArea:
         "Vị trí của bạn nằm ngoài khu vực hỗ trợ. Hiện hệ thống chỉ phục vụ tại TP. Hồ Chí Minh.",
@@ -63,10 +70,14 @@ export const guestStrings = {
     assignedHospitalLabel: "Bệnh viện phụ trách",
     assignedHospitalHotline: "Hotline",
     trackingFallback: "Đang chờ điều xe...",
+    awaitingDispatchSuffix: "đang tiếp nhận yêu cầu của bạn. Vui lòng chờ điều phối xe.",
+    awaitingDispatchFallback: "Bệnh viện đang tiếp nhận yêu cầu của bạn. Vui lòng chờ điều phối xe.",
+    awaitingDispatchBadge: "Đang chờ điều phối",
     trackingAssigned: "Xe cứu thương đã được điều phối.",
     trackingEtaPrefix: "Xe cứu thương cách bạn",
     trackingEtaSuffix: "phút",
     trackingReconnect: "Đang kết nối lại...",
+    trackingOffline: "Mất kết nối mạng — đang chờ kết nối lại...",
     trackingModeBadge: "Chế độ theo dõi cấp cứu",
     rescueCompleted: "Xe cứu thương đã đến nơi.",
     locationStatusUnknown: "Chưa có vị trí hiện tại.",

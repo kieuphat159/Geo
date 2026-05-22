@@ -427,6 +427,7 @@ export function initMockBackend(): void {
 
             return jsonResponse({
                 request_id: SOS_REQUEST_ID,
+                session_token: crypto.randomUUID(),
                 hospital: {
                     name: "Bệnh viện Chợ Rẫy",
                     hotline: "028 3855 4137",

@@ -51,6 +51,7 @@ export interface GeoJsonLineString {
 
 export interface SosResponse {
     request_id: number;
+    session_token?: string;
     assigned_hospital?: AssignedHospital;
     route_path?: GeoJsonLineString | [number, number][];
     eta_minutes?: number;

@@ -12,11 +12,71 @@ export interface AuthSession {
   };
 }
 
+function parseJwtPayload(token: string): Record<string, unknown> | null {
+  if (!token || typeof token !== "string") {
+    return null;
+  }
+
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return null;
+  }
+
+  try {
+    if (typeof atob !== "function") {
+      return null;
+    }
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const normalized = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const json = atob(normalized);
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function toKnownRoleId(roleIdRaw: unknown, roleRaw?: unknown): number | null {
+  const roleId = Number(roleIdRaw);
+  if (roleId === 1 || roleId === 2 || roleId === 3) {
+    return roleId;
+  }
+
+  const roleText = typeof roleRaw === "string" ? roleRaw.trim().toUpperCase() : "";
+  if (roleText === "SUPER_ADMIN") return 1;
+  if (roleText === "ADMIN") return 2;
+  if (roleText === "USER") return 3;
+  return null;
+}
+
 /** Cookie used for the signed-in session (replaces legacy localStorage). */
 export const AUTH_SESSION_COOKIE_NAME = "geo_auth_session";
+/** Fired after saveSession / clearSession so route guards re-read cookie. */
+export const AUTH_SESSION_CHANGED_EVENT = "geo-auth-session-changed";
 const AUTH_LEGACY_LOCAL_KEY = "geo:auth-session";
-const GUEST_UUID_STORAGE_KEY = "geo:guest-uuid";
 const AUTH_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 30;
+const ACTIVE_TRACKING_HINT_KEY = "geo:has-active-tracking";
+const ACTIVE_TRACKING_SNAPSHOT_KEY = "geo:active-tracking-snapshot";
+const ANONYMOUS_SOS_SESSION_KEY = "geo:anonymous-sos-session";
+const ANONYMOUS_SOS_DECLINED_KEY = "geo:anonymous-sos-declined";
+
+function notifyAuthSessionChanged(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.dispatchEvent(new Event(AUTH_SESSION_CHANGED_EVENT));
+}
+
+function clearAnonymousSosReconcileState(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    localStorage.removeItem(ANONYMOUS_SOS_SESSION_KEY);
+    localStorage.removeItem(ANONYMOUS_SOS_DECLINED_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 function resolveApiUrl(pathname: string): URL {
   const configuredBaseUrl = import.meta.env.VITE_API_URL;
@@ -58,6 +118,37 @@ function removeLegacyLocalSession() {
   }
 }
 
+function clearClientTrackingState() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(ACTIVE_TRACKING_HINT_KEY);
+    localStorage.removeItem(ACTIVE_TRACKING_SNAPSHOT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function readStoredSessionWithoutMigration(): AuthSession | null {
+  if (typeof window === "undefined") return null;
+
+  const fromCookie = readSessionCookieRaw();
+  if (fromCookie) {
+    try {
+      return JSON.parse(fromCookie) as AuthSession;
+    } catch {
+      return null;
+    }
+  }
+
+  const raw = localStorage.getItem(AUTH_LEGACY_LOCAL_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as AuthSession;
+  } catch {
+    return null;
+  }
+}
+
 export function getStoredSession(): AuthSession | null {
   if (typeof window === "undefined") return null;
 
@@ -87,11 +178,27 @@ export function getAuthToken(): string | null {
 }
 
 /** Backend role ids we trust for routing (1=SuperAdmin, 2=Hospital admin, 3=User). */
+/** True when JWT access token is missing exp or within skew seconds of expiry. */
+export function isAccessTokenExpired(token: string, skewSeconds = 45): boolean {
+  const payload = parseJwtPayload(token);
+  const exp = Number(payload?.exp);
+  if (!Number.isFinite(exp)) {
+    return true;
+  }
+  return Date.now() >= (exp - skewSeconds) * 1000;
+}
+
 export function normalizeKnownRoleId(session: AuthSession | null): number | null {
-  if (!session?.user) return null;
-  const n = Number(session.user.role_id);
-  if (n === 1 || n === 2 || n === 3) return n;
-  return null;
+  if (session?.user) {
+    const fromUser = toKnownRoleId(session.user.role_id, session.user.role);
+    if (fromUser !== null) {
+      return fromUser;
+    }
+  }
+
+  if (!session?.token) return null;
+  const payload = parseJwtPayload(session.token);
+  return toKnownRoleId(payload?.role_id);
 }
 
 /** Single destination per role so `/admin` and `/super-admin` never redirect in a loop. */
@@ -102,13 +209,40 @@ export function homePathForRoleId(roleId: number | null): string {
 }
 
 export function saveSession(session: AuthSession) {
+  const previous = readStoredSessionWithoutMigration();
+  const previousUserId = previous?.user?.id != null ? Number(previous.user.id) : null;
+  const nextUserId = session?.user?.id != null ? Number(session.user.id) : null;
+  if (
+    previousUserId !== null &&
+    nextUserId !== null &&
+    Number.isFinite(previousUserId) &&
+    Number.isFinite(nextUserId) &&
+    previousUserId !== nextUserId
+  ) {
+    clearClientTrackingState();
+  }
   writeSessionCookie(JSON.stringify(session));
   removeLegacyLocalSession();
+
+  const roleId = toKnownRoleId(session.user.role_id, session.user.role);
+  if (roleId !== 3) {
+    clearAnonymousSosReconcileState();
+  }
+  notifyAuthSessionChanged();
 }
 
+/** Clears cookie/local auth artifacts and in-flight refresh state. */
 export function clearSession() {
+  refreshPromise = null;
   eraseSessionCookie();
   removeLegacyLocalSession();
+  clearClientTrackingState();
+  notifyAuthSessionChanged();
+}
+
+/** Logout helper — same as clearSession (no separate React auth context in this app). */
+export function logout(): void {
+  clearSession();
 }
 
 let refreshPromise: Promise<AuthSession | null> | null = null;
@@ -157,7 +291,7 @@ export async function loginWithGoogle(idToken: string): Promise<AuthSession> {
 }
 
 async function finalizeAuthSession(data: any): Promise<AuthSession> {
-  const normalizedRoleId = Number(data?.user?.role_id ?? 0);
+  const normalizedRoleId = toKnownRoleId(data?.user?.role_id, data?.user?.role);
   const facilityRaw = data?.user?.facility_id ?? data?.user?.facility?.id;
   const facilityId =
     facilityRaw === null || facilityRaw === undefined || facilityRaw === ""
@@ -168,19 +302,18 @@ async function finalizeAuthSession(data: any): Promise<AuthSession> {
     refresh_token: data.refresh_token,
     user: {
       ...data.user,
-      role_id: Number.isFinite(normalizedRoleId) ? normalizedRoleId : 0,
+      role_id: normalizedRoleId ?? 0,
       facility_id: Number.isFinite(facilityId) ? facilityId : null,
     },
   };
   saveSession(session);
-  await linkGuestAccountIfAvailable(session.token);
   return session;
 }
 
 export async function refreshAccessToken(): Promise<AuthSession | null> {
   const currentSession = getStoredSession();
-  const refreshToken = currentSession?.refresh_token;
-  if (!refreshToken) {
+  const refreshTokenAtStart = currentSession?.refresh_token;
+  if (!refreshTokenAtStart) {
     clearSession();
     return null;
   }
@@ -188,8 +321,13 @@ export async function refreshAccessToken(): Promise<AuthSession | null> {
   const response = await fetch(resolveApiUrl("/api/auth/refresh-token").toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ refresh_token: refreshToken }),
+    body: JSON.stringify({ refresh_token: refreshTokenAtStart }),
   });
+
+  const latestBeforeApply = getStoredSession();
+  if (!latestBeforeApply?.refresh_token || latestBeforeApply.refresh_token !== refreshTokenAtStart) {
+    return latestBeforeApply;
+  }
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -197,8 +335,16 @@ export async function refreshAccessToken(): Promise<AuthSession | null> {
     return null;
   }
 
+  const latestAfterFetch = getStoredSession();
+  if (!latestAfterFetch?.refresh_token || latestAfterFetch.refresh_token !== refreshTokenAtStart) {
+    return latestAfterFetch;
+  }
+
   const data = payload?.data;
-  const normalizedRoleId = Number(data?.user?.role_id ?? currentSession.user.role_id ?? 0);
+  const normalizedRoleId = toKnownRoleId(
+    data?.user?.role_id ?? currentSession.user.role_id,
+    data?.user?.role ?? currentSession.user.role,
+  );
   const facilityRaw = data?.user?.facility_id ?? data?.user?.facility?.id ?? currentSession.user.facility_id;
   const facilityId =
     facilityRaw === null || facilityRaw === undefined || facilityRaw === ""
@@ -206,11 +352,11 @@ export async function refreshAccessToken(): Promise<AuthSession | null> {
       : Number(facilityRaw);
   const nextSession: AuthSession = {
     token: data?.token,
-    refresh_token: data?.refresh_token ?? refreshToken,
+    refresh_token: data?.refresh_token ?? refreshTokenAtStart,
     user: data?.user
       ? {
           ...data.user,
-          role_id: Number.isFinite(normalizedRoleId) ? normalizedRoleId : currentSession.user.role_id,
+          role_id: normalizedRoleId ?? currentSession.user.role_id,
           facility_id: Number.isFinite(facilityId) ? facilityId : currentSession.user.facility_id ?? null,
         }
       : currentSession.user,
@@ -261,23 +407,3 @@ export async function authorizedFetch(input: string | URL, init: RequestInit = {
   return response;
 }
 
-async function linkGuestAccountIfAvailable(token: string): Promise<void> {
-  const guestUuid = localStorage.getItem(GUEST_UUID_STORAGE_KEY);
-  if (!guestUuid || !guestUuid.trim()) {
-    return;
-  }
-
-  try {
-    await fetch(resolveApiUrl("/api/auth/link-guest-account").toString(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ guest_uuid: guestUuid }),
-    });
-  } catch (error) {
-    console.warn("Guest account linking failed", error);
-  }
-}
