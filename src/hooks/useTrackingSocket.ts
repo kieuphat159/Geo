@@ -118,6 +118,7 @@ export function useTrackingSocket({ requestId, enabled, trackingToken, onEvent }
                     request_id: safeRequestId,
                     status: "ASSIGNED",
                     eta_minutes: payload?.eta_minutes,
+                    route_path: payload?.route_path ?? payload?.routePath,
                 });
             });
 
@@ -133,6 +134,7 @@ export function useTrackingSocket({ requestId, enabled, trackingToken, onEvent }
                     updated_at: payload?.timestamp,
                     eta_minutes: payload?.eta_minutes,
                     status: payload?.status,
+                    route_path: payload?.route_path ?? payload?.routePath,
                 });
             });
 

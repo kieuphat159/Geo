@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import AppToast from "./AppToast";
 import { formControlFieldClassNameMt1 } from "../constants/formClasses";
 import * as adminApi from "../services/adminApi";
 import type { Facility, FacilityType } from "../types/guest";
@@ -473,15 +474,12 @@ export default function FacilityAdminModal({
             ) : null}
 
             {toast ? (
-                <div className="pointer-events-auto fixed bottom-6 right-6 z-[920]">
-                    <div
-                        className={`rounded-xl px-4 py-3 text-sm font-semibold text-white shadow-lg ${
-                            toast.type === "success" ? "bg-emerald-600" : "bg-red-600"
-                        }`}
-                    >
-                        {toast.message}
-                    </div>
-                </div>
+                <AppToast
+                    variant={toast.type === "success" ? "success" : "error"}
+                    onClose={() => setToast(null)}
+                >
+                    <p className="font-semibold">{toast.message}</p>
+                </AppToast>
             ) : null}
         </div>
     );

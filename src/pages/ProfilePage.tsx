@@ -63,7 +63,7 @@ export default function ProfilePage() {
       maxWidthClass="max-w-2xl"
       backTo={{ href: "/user", label: "Về bản đồ SOS" }}
     >
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <p className="text-sm text-slate-600">
           Các trường có dấu <span className="font-semibold text-red-600">*</span> nên điền đầy đủ để hỗ trợ cấp cứu nhanh hơn.
         </p>
@@ -146,9 +146,9 @@ export default function ProfilePage() {
           </p>
         ) : null}
 
-        <div className="mt-6 flex justify-end">
+        <div className="mt-6 flex justify-stretch sm:justify-end">
           <button
-            className={btnPrimaryClass}
+            className={`${btnPrimaryClass} w-full sm:w-auto`}
             disabled={loading || profileLoading}
             type="button"
             onClick={async () => {

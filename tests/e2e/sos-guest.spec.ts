@@ -122,16 +122,19 @@ test.describe("TC04–TC07 SOS (Guest)", () => {
         await expect(page.getByText("Yêu cầu SOS đã được gửi!")).toBeVisible();
         await expect(page.getByText(/Đang chờ điều xe\.\.\./i).first()).toBeVisible();
 
-        await expectRoutePathRendered(page);
+        expect(json.assigned_hospital?.name).toBeTruthy();
+        await expect(page.getByText(json.assigned_hospital.name).first()).toBeVisible();
+        await expect(page.getByText(/Bệnh viện gần nhất tiếp nhận/i).first()).toBeVisible();
+        await expect(page.getByText(/đang tiếp nhận yêu cầu của bạn/i).first()).toBeVisible();
 
-        const statusText = await page.getByText(/Xe cứu thương cách bạn/i).first().textContent();
-        const displayedEta = statusText ? parseEtaMinutesFromText(statusText) : null;
-        expect(displayedEta).not.toBeNull();
-
-        const actualEtaMinutes = Number(json.eta_minutes);
-        const actual = actualEtaMinutes > 0 ? actualEtaMinutes : 1;
-        const diffRatio = Math.abs((displayedEta as number) - actual) / actual;
-        expect(diffRatio).toBeLessThan(0.12);
+        const hasStraightRoute = await page.evaluate(() => {
+            const paths = Array.from(document.querySelectorAll("path.leaflet-interactive"));
+            return paths.some((p) => {
+                const stroke = (p.getAttribute("stroke") || "").toLowerCase();
+                return stroke.includes("7c3aed") || stroke.includes("124, 58, 237");
+            });
+        });
+        expect(hasStraightRoute).toBeFalsy();
     });
 
     test("TC05 - Gửi SOS - Từ chối GPS", async ({ page }) => {

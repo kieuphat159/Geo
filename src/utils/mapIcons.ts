@@ -23,15 +23,6 @@ function createCircleIcon(color: string): DivIcon {
     });
 }
 
-function createEmojiIcon(emoji: string, className: string): DivIcon {
-    return L.divIcon({
-        className,
-        html: `<span>${emoji}</span>`,
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
-    });
-}
-
 function createFacilityTypeIcon(emoji: string, className: string): DivIcon {
     return L.divIcon({
         className: `facility-type-marker ${className}`,
@@ -63,7 +54,12 @@ export const userLocationIcon = L.divIcon({
     iconAnchor: [14, 14],
 });
 export const hospitalIcon = createCircleIcon("#7c3aed");
-export const ambulanceIcon = createEmojiIcon("🚑", "ambulance-marker");
+export const ambulanceIcon = L.divIcon({
+    className: "ambulance-marker",
+    html: "<span aria-hidden='true'>🚑</span>",
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+});
 export const facilityHospitalIcon = createSvgIcon("facility-svg-marker", hospitalFacilitySvg, [34, 34], [17, 17]);
 export const facilityClinicIcon = createSvgIcon("facility-svg-marker", clinicFacilitySvg, [34, 34], [17, 17]);
 export const facilityPharmacyIcon = createFacilityTypeIcon("💊", "facility-pharmacy-marker");

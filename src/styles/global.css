@@ -240,12 +240,27 @@
 .ambulance-marker span {
     display: grid;
     place-items: center;
-    width: 28px;
-    height: 28px;
+    position: relative;
+    width: 38px;
+    height: 38px;
     border-radius: 999px;
-    background: #ffffff;
-    border: 2px solid #7c3aed;
-    box-shadow: 0 8px 20px rgba(124, 58, 237, 0.35);
+    background: radial-gradient(circle at 35% 30%, #ffffff 0%, #ede9fe 70%, #ddd6fe 100%);
+    border: 3px solid #6d28d9;
+    box-shadow: 0 10px 24px rgba(109, 40, 217, 0.5), 0 0 0 5px rgba(139, 92, 246, 0.26);
+    font-size: 20px;
+    line-height: 1;
+    animation: ambulance-beacon 1.2s ease-in-out infinite;
+}
+
+.ambulance-marker span::after {
+    content: "";
+    position: absolute;
+    inset: -7px;
+    border-radius: 999px;
+    border: 2px solid rgba(139, 92, 246, 0.45);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
+    animation: ambulance-ring 1.8s ease-out infinite;
+    pointer-events: none;
 }
 
 @keyframes sos-pulse {
@@ -275,6 +290,31 @@
     100% {
         transform: scale(1);
         box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+    }
+}
+
+@keyframes ambulance-beacon {
+    0%,
+    100% {
+        transform: translateY(0) scale(1);
+    }
+    50% {
+        transform: translateY(-1px) scale(1.08);
+    }
+}
+
+@keyframes ambulance-ring {
+    0% {
+        transform: scale(0.92);
+        opacity: 0.9;
+    }
+    70% {
+        transform: scale(1.22);
+        opacity: 0;
+    }
+    100% {
+        transform: scale(1.24);
+        opacity: 0;
     }
 }
 

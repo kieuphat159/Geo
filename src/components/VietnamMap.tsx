@@ -138,6 +138,7 @@ export default function VietnamMap({
         ? [assignedHospital.lat, assignedHospital.lng]
         : null;
     const markerRefs = useRef<Record<string, LeafletMarker | null>>({});
+    const ambulanceMarkerRef = useRef<LeafletMarker | null>(null);
     const mapRef = useRef<LeafletMap | null>(null);
     /** Avoid re-flying to the same facility when only `facilities` refetches (e.g. after GPS locate). */
     const lastSelectionFlyToRef = useRef<string | number | null>(null);
@@ -162,6 +163,20 @@ export default function VietnamMap({
         mapRef.current.flyTo([selected.lat, selected.lng], 16, { duration: 0.9 });
         window.setTimeout(() => marker.openPopup(), 220);
     }, [facilities, selectedFacilityId]);
+
+    useEffect(() => {
+        if (mode !== "tracking" || !ambulancePosition) {
+            return;
+        }
+
+        const timerId = window.setTimeout(() => {
+            ambulanceMarkerRef.current?.openPopup();
+        }, 260);
+
+        return () => {
+            window.clearTimeout(timerId);
+        };
+    }, [ambulancePosition, mode, trackingFocusNonce]);
 
     return (
         <MapContainer
@@ -260,7 +275,22 @@ export default function VietnamMap({
             {sosPosition ? <Marker position={sosPosition} icon={sosPulseIcon} /> : null}
             {hospitalPosition ? <Marker position={hospitalPosition} icon={hospitalIcon} /> : null}
             {mode === "tracking" && ambulancePosition ? (
-                <Marker position={ambulancePosition} icon={ambulanceIcon} />
+                <Marker
+                    position={ambulancePosition}
+                    icon={ambulanceIcon}
+                    ref={(instance) => {
+                        ambulanceMarkerRef.current = instance;
+                    }}
+                >
+                    <Popup>
+                        <div className="min-w-[170px]">
+                            <p className="text-sm font-bold text-violet-950">Xe cuu thuong dang di chuyen</p>
+                            <p className="mt-1 text-xs text-slate-600">
+                                He thong dang cap nhat vi tri truc tiep.
+                            </p>
+                        </div>
+                    </Popup>
+                </Marker>
             ) : null}
 
             {routePath.length >= 2 ? (

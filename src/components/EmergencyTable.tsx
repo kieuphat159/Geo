@@ -14,21 +14,7 @@ interface EmergencyTableProps {
     rows: EmergencyCase[];
     ambulances?: AmbulanceRow[];
     onDispatch?: (emergencyId: string, ambulanceId: number) => void;
-    onArrived?: (emergencyId: string) => void;
-    onComplete?: (emergencyId: string) => void;
 }
-
-const priorityClassMap: Record<EmergencyCase["priority"], string> = {
-    CRITICAL: "bg-red-50 text-red-700 ring-1 ring-inset ring-red-600/20",
-    HIGH: "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20",
-    MEDIUM: "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-600/20",
-};
-
-const priorityTextMap: Record<EmergencyCase["priority"], string> = {
-    CRITICAL: "Nguy kịch",
-    HIGH: "Cao",
-    MEDIUM: "Trung bình",
-};
 
 const statusTextMap: Record<EmergencyCase["status"], string> = {
     WAITING: "Đang chờ",
@@ -38,7 +24,30 @@ const statusTextMap: Record<EmergencyCase["status"], string> = {
     COMPLETED: "Hoàn thành",
 };
 
-export default function EmergencyTable({ rows, ambulances = [], onDispatch, onArrived, onComplete }: EmergencyTableProps) {
+const statusClassMap: Record<EmergencyCase["status"], string> = {
+    WAITING: "border-amber-200 bg-amber-50 text-amber-800",
+    ASSIGNED: "border-indigo-200 bg-indigo-50 text-indigo-800",
+    ON_THE_WAY: "border-blue-200 bg-blue-50 text-blue-800",
+    ARRIVED: "border-violet-200 bg-violet-50 text-violet-800",
+    COMPLETED: "border-emerald-200 bg-emerald-50 text-emerald-800",
+};
+
+function formatEmergencyTime(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+    return new Intl.DateTimeFormat("vi-VN", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    }).format(date);
+}
+
+export default function EmergencyTable({ rows, ambulances = [], onDispatch }: EmergencyTableProps) {
     const [pickByRow, setPickByRow] = useState<Record<string, string>>({});
 
     const availableAmbulances = useMemo(
@@ -128,6 +137,7 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                 {rows.map((row) => {
                     const rowStatus = normalizeEmergencyStatus(row.status);
                     const waiting = isWaitingForDispatch(rowStatus);
+                    const formattedTime = formatEmergencyTime(row.createdAt);
                     return (
                     <article
                         key={row.id}
@@ -135,26 +145,30 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                     >
                         <div className="mb-4 flex items-start justify-between gap-3">
                             <h3 className="text-sm font-bold tracking-tight text-slate-900">{row.id}</h3>
-                            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${priorityClassMap[row.priority]}`}>
-                                {priorityTextMap[row.priority]}
+                            <span
+                                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClassMap[rowStatus]}`}
+                            >
+                                {statusTextMap[rowStatus]}
                             </span>
                         </div>
 
-                        <dl className="space-y-2.5 text-sm text-slate-600">
+                        <div className="space-y-2.5 text-sm text-slate-600">
                             <div className="flex justify-between">
-                                <dt className="text-slate-500">Thời gian:</dt>{" "}
-                                <dd className="font-medium text-slate-900">{row.createdAt}</dd>
+                                <p className="text-slate-500">Thời gian:</p>
+                                <p className="font-medium text-slate-900" title={row.createdAt}>
+                                    {formattedTime}
+                                </p>
                             </div>
                             <div className="flex flex-col">
-                                <dt className="text-slate-500">Địa chỉ:</dt>
-                                <dd className="mt-0.5 font-medium leading-relaxed text-slate-900">{row.address}</dd>
-                                <dd className="mt-1 font-mono text-xs text-slate-400">
+                                <p className="text-slate-500">Địa chỉ:</p>
+                                <p className="mt-0.5 font-medium leading-relaxed text-slate-900">{row.address}</p>
+                                <p className="mt-1 font-mono text-xs text-slate-400">
                                     {row.latitude.toFixed(5)}, {row.longitude.toFixed(5)}
-                                </dd>
+                                </p>
                             </div>
                             <div className="flex justify-between border-t border-slate-50 pt-2.5">
-                                <dt className="text-slate-500">Khoảng cách:</dt>{" "}
-                                <dd className="font-medium text-slate-900">{row.distanceKm.toFixed(1)} km</dd>
+                                <p className="text-slate-500">Khoảng cách:</p>
+                                <p className="font-medium text-slate-900">{row.distanceKm.toFixed(1)} km</p>
                             </div>
                             {row.medical_profile?.blood_type || row.medical_profile?.allergies ? (
                                 <div className="rounded-lg border border-red-200 bg-red-50 p-2">
@@ -166,52 +180,19 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                                     ) : null}
                                 </div>
                             ) : null}
-                            <div className="flex justify-between">
-                                <dt className="text-slate-500">Trạng thái:</dt>
-                                <dd className="font-medium text-slate-900">{statusTextMap[rowStatus]}</dd>
-                            </div>
                             {rowStatus === "ASSIGNED" || rowStatus === "ON_THE_WAY" ? (
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700">
                                     <span className="font-semibold">Xe: </span>
                                     {plateForAssigned(row) ?? `#${row.assigned_ambulance_id ?? "—"}`}
                                 </div>
                             ) : null}
-                        </dl>
+                        </div>
 
                         {waiting && onDispatch ? (
                             <div className="mt-4">
                                 <p className="mb-2 text-xs font-semibold text-slate-600">Chọn xe và điều động</p>
                                 {renderVehiclePicker(row.id)}
                             </div>
-                        ) : null}
-
-                        {(rowStatus === "ASSIGNED" || rowStatus === "ON_THE_WAY") && onArrived && onComplete ? (
-                            <div className="mt-4 flex flex-col gap-2">
-                                <button
-                                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500"
-                                    type="button"
-                                    onClick={() => onArrived(row.id)}
-                                >
-                                    Đã đến nơi
-                                </button>
-                                <button
-                                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600"
-                                    type="button"
-                                    onClick={() => onComplete(row.id)}
-                                >
-                                    Hoàn thành ca
-                                </button>
-                            </div>
-                        ) : null}
-
-                        {rowStatus === "ARRIVED" && onComplete ? (
-                            <button
-                                className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600"
-                                type="button"
-                                onClick={() => onComplete(row.id)}
-                            >
-                                Hoàn thành ca
-                            </button>
                         ) : null}
 
                         {rowStatus === "ASSIGNED" ? (
@@ -227,12 +208,11 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
             </div>
 
             <div className="hidden overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm md:block">
-                <table className="w-full min-w-[960px] border-collapse text-sm">
+                <table className="w-full min-w-[900px] border-collapse text-sm">
                     <thead>
                         <tr className="border-b border-slate-200 bg-slate-50/50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                             <th className="px-5 py-4">Mã ca</th>
                             <th className="px-5 py-4">Thời gian</th>
-                            <th className="px-5 py-4">Mức độ</th>
                             <th className="px-5 py-4">Vị trí</th>
                             <th className="truncate px-5 py-4">Cách</th>
                             <th className="px-5 py-4">Trạng thái</th>
@@ -244,16 +224,12 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                         {rows.map((row) => {
                             const rowStatus = normalizeEmergencyStatus(row.status);
                             const waiting = isWaitingForDispatch(rowStatus);
+                            const formattedTime = formatEmergencyTime(row.createdAt);
                             return (
-                            <tr key={row.id} className="group bg-white transition-colors hover:bg-slate-50/80">
+                            <tr key={row.id} className="group bg-white transition-colors odd:bg-white even:bg-slate-50/30 hover:bg-slate-50/80">
                                 <td className="px-5 py-4 font-semibold text-slate-900">{row.id}</td>
-                                <td className="whitespace-nowrap px-5 py-4 text-slate-600">{row.createdAt}</td>
-                                <td className="px-5 py-4">
-                                    <span
-                                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${priorityClassMap[row.priority]}`}
-                                    >
-                                        {priorityTextMap[row.priority]}
-                                    </span>
+                                <td className="whitespace-nowrap px-5 py-4 text-slate-600" title={row.createdAt}>
+                                    {formattedTime}
                                 </td>
                                 <td className="px-5 py-4">
                                     <div className="max-w-[260px] font-medium leading-snug text-slate-900">{row.address}</div>
@@ -272,7 +248,13 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                                     ) : null}
                                 </td>
                                 <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-600">{row.distanceKm.toFixed(1)} km</td>
-                                <td className="whitespace-nowrap px-5 py-4 text-slate-600">{statusTextMap[rowStatus]}</td>
+                                <td className="whitespace-nowrap px-5 py-4">
+                                    <span
+                                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClassMap[rowStatus]}`}
+                                    >
+                                        {statusTextMap[rowStatus]}
+                                    </span>
+                                </td>
                                 <td className="min-w-[280px] px-5 py-4 text-slate-700">
                                     {waiting && onDispatch ? (
                                         renderVehiclePicker(row.id, true)
@@ -284,43 +266,10 @@ export default function EmergencyTable({ rows, ambulances = [], onDispatch, onAr
                                 </td>
                                 <td className="sticky right-0 z-[1] bg-white px-5 py-4 text-right group-hover:bg-slate-50/80">
                                     <div className="inline-flex flex-wrap items-center justify-end gap-2">
-                                        {(rowStatus === "ASSIGNED" || rowStatus === "ON_THE_WAY") && onArrived && onComplete ? (
-                                            <>
-                                                <button
-                                                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-500"
-                                                    type="button"
-                                                    onClick={() => onArrived(row.id)}
-                                                >
-                                                    Đã đến nơi
-                                                </button>
-                                                <button
-                                                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-600"
-                                                    type="button"
-                                                    onClick={() => onComplete(row.id)}
-                                                >
-                                                    Hoàn thành ca
-                                                </button>
-                                            </>
-                                        ) : null}
-
-                                        {rowStatus === "ARRIVED" && onComplete ? (
-                                            <button
-                                                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-600"
-                                                type="button"
-                                                onClick={() => onComplete(row.id)}
-                                            >
-                                                Hoàn thành ca
-                                            </button>
-                                        ) : null}
-
                                         {rowStatus === "COMPLETED" ? (
-                                            <button
-                                                className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-500 ring-1 ring-inset ring-slate-200 shadow-sm"
-                                                type="button"
-                                                disabled
-                                            >
+                                            <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
                                                 Hoàn thành
-                                            </button>
+                                            </span>
                                         ) : null}
                                     </div>
                                 </td>

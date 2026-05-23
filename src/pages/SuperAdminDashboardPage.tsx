@@ -472,14 +472,14 @@ export default function SuperAdminDashboardPage() {
                 ) : null}
 
                 <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
                         <p className="text-sm text-slate-500">Tổng cơ sở y tế</p>
                         <p className="mt-1 text-2xl font-bold">{facilities.length}</p>
                         <p className="mt-2 text-xs text-slate-500">
                             Gồm cả cơ sở đang kích hoạt và đã tạm ngưng (soft delete).
                         </p>
                     </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
                         <p className="text-sm text-slate-500">Đang kích hoạt</p>
                         <p className="mt-1 text-2xl font-bold text-emerald-700">{activeFacilityCount}</p>
                         <p className="mt-2 text-xs text-slate-500">
@@ -491,7 +491,7 @@ export default function SuperAdminDashboardPage() {
                                 : `${inactiveFacilityCount} cơ sở tạm ngưng — ${pctActive}% còn kích hoạt.`}
                         </p>
                     </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
                         <p className="text-sm text-slate-500">Admin bệnh viện (hoạt động)</p>
                         <p className="mt-1 text-2xl font-bold">{activeHospitalAdminCount}</p>
                         <p className="mt-2 text-xs text-slate-500">
@@ -502,12 +502,12 @@ export default function SuperAdminDashboardPage() {
                 </section>
 
                 <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    <div className="flex min-h-[560px] flex-col rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:h-[560px]">
+                    <div className="flex min-h-[420px] flex-col rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:min-h-[560px] sm:p-5 lg:h-[560px]">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <h2 className="text-lg font-semibold">Quản lý cơ sở y tế</h2>
                             <button
                                 type="button"
-                                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500"
+                                className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500 sm:w-auto"
                                 onClick={() => openFacilityModal({ mode: "create" })}
                             >
                                 + Thêm cơ sở mới
@@ -539,7 +539,7 @@ export default function SuperAdminDashboardPage() {
                             </select>
                         </div>
                         <div className="mt-4 min-h-0 flex-1 overflow-auto">
-                            <table className="w-full text-sm">
+                            <table className="min-w-[680px] w-full text-sm">
                                 <thead className="sticky top-0 z-[1] bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                                     <tr>
                                         <th className="py-3 pr-2">Mã</th>
@@ -629,7 +629,7 @@ export default function SuperAdminDashboardPage() {
                         </div>
                     </div>
 
-                    <div className="flex min-h-[560px] flex-col rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:h-[560px]">
+                    <div className="flex min-h-[420px] flex-col rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:min-h-[560px] sm:p-5 lg:h-[560px]">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                                 <h2 className="text-lg font-semibold">Tài khoản Admin bệnh viện</h2>
@@ -639,7 +639,7 @@ export default function SuperAdminDashboardPage() {
                             </div>
                             <button
                                 type="button"
-                                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500"
+                                className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500 sm:w-auto"
                                 onClick={openCreateAdminModal}
                             >
                                 + Tạo tài khoản Admin BV
@@ -677,7 +677,7 @@ export default function SuperAdminDashboardPage() {
                         ) : null}
 
                         <div className="mt-3 min-h-0 flex-1 overflow-auto">
-                            <table className="w-full text-sm">
+                            <table className="min-w-[700px] w-full text-sm">
                                 <thead className="sticky top-0 z-[1] bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                                     <tr>
                                         <th className="py-3 pr-2">Tài khoản</th>

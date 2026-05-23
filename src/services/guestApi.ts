@@ -252,6 +252,36 @@ function inferFacilityTypeFromName(name: string): FacilityType | undefined {
     return undefined;
 }
 
+function parseGeoJsonPoint(value: unknown): { lat: number; lng: number } | undefined {
+    let parsed = value;
+
+    if (typeof parsed === "string") {
+        try {
+            parsed = JSON.parse(parsed) as unknown;
+        } catch {
+            return undefined;
+        }
+    }
+
+    if (!parsed || typeof parsed !== "object") {
+        return undefined;
+    }
+
+    const point = parsed as { type?: string; coordinates?: unknown[] };
+    if (point.type !== "Point" || !Array.isArray(point.coordinates) || point.coordinates.length < 2) {
+        return undefined;
+    }
+
+    const lng = toNumber(point.coordinates[0]);
+    const lat = toNumber(point.coordinates[1]);
+
+    if (lat === undefined || lng === undefined) {
+        return undefined;
+    }
+
+    return { lat, lng };
+}
+
 function parseAssignedHospital(input: unknown): AssignedHospital | undefined {
     if (!input || typeof input !== "object") {
         return undefined;
@@ -259,12 +289,20 @@ function parseAssignedHospital(input: unknown): AssignedHospital | undefined {
 
     const hospital = input as Record<string, unknown>;
 
-    const lat = toNumber(hospital.lat ?? hospital.latitude);
-    const lng = toNumber(hospital.lng ?? hospital.longitude);
+    let lat = toNumber(hospital.lat ?? hospital.latitude);
+    let lng = toNumber(hospital.lng ?? hospital.longitude);
     const name =
         (hospital.name as string | undefined) ||
         (hospital.hospital_name as string | undefined) ||
         (hospital.hospitalName as string | undefined);
+
+    if ((lat === undefined || lng === undefined) && hospital.location) {
+        const point = parseGeoJsonPoint(hospital.location);
+        if (point) {
+            lat = point.lat;
+            lng = point.lng;
+        }
+    }
 
     if (!name || lat === undefined || lng === undefined) {
         return undefined;
@@ -280,6 +318,57 @@ function parseAssignedHospital(input: unknown): AssignedHospital | undefined {
         lat,
         lng,
     };
+}
+
+export function resolveAssignedHospitalFromSos(
+    response: Pick<SosResponse, "assigned_hospital" | "route_path">,
+    victimPosition?: [number, number],
+): AssignedHospital | null {
+    const parsed = parseAssignedHospital(response.assigned_hospital);
+    if (parsed) {
+        return parsed;
+    }
+
+    const routeCoords = normalizeRoutePath(response.route_path)?.coordinates ?? [];
+    const name =
+        response.assigned_hospital && typeof response.assigned_hospital === "object"
+            ? ((response.assigned_hospital as { name?: string }).name ?? undefined)
+            : undefined;
+
+    if (!name || routeCoords.length < 2) {
+        return null;
+    }
+
+    const [firstLng, firstLat] = routeCoords[0];
+    const hotline =
+        response.assigned_hospital && typeof response.assigned_hospital === "object"
+            ? ((response.assigned_hospital as { hotline?: string; phone?: string }).hotline ??
+              (response.assigned_hospital as { phone?: string }).phone)
+            : undefined;
+
+    if (Number.isFinite(firstLat) && Number.isFinite(firstLng)) {
+        return {
+            id:
+                response.assigned_hospital && typeof response.assigned_hospital === "object"
+                    ? (response.assigned_hospital as { id?: string | number }).id
+                    : undefined,
+            name,
+            hotline,
+            lat: firstLat,
+            lng: firstLng,
+        };
+    }
+
+    if (victimPosition) {
+        return {
+            name,
+            hotline,
+            lat: victimPosition[0],
+            lng: victimPosition[1],
+        };
+    }
+
+    return null;
 }
 
 function parseLatLngObject(input: unknown): { lat: number; lng: number } | undefined {

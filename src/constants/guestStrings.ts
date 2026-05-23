@@ -68,6 +68,7 @@ export const guestStrings = {
     sosSuccessTitle: "Yêu cầu SOS đã được gửi!",
     sosSuccessBody: "Đang chờ điều xe...",
     assignedHospitalLabel: "Bệnh viện phụ trách",
+    nearestHospitalLabel: "Bệnh viện gần nhất tiếp nhận",
     assignedHospitalHotline: "Hotline",
     trackingFallback: "Đang chờ điều xe...",
     awaitingDispatchSuffix: "đang tiếp nhận yêu cầu của bạn. Vui lòng chờ điều phối xe.",

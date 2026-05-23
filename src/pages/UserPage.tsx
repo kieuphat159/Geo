@@ -18,7 +18,12 @@ import { useAnonymousSosLinkBanner } from "../hooks/useAnonymousSosLinkBanner";
 import { useTrackingSocket } from "../hooks/useTrackingSocket";
 import { saveAnonymousSosSession } from "../services/anonymousSosSession";
 import { getStoredSession, logout, normalizeKnownRoleId } from "../services/auth";
-import { fetchFacilities, getActiveEmergencySos, sendEmergencySos } from "../services/guestApi";
+import {
+    fetchFacilities,
+    getActiveEmergencySos,
+    resolveAssignedHospitalFromSos,
+    sendEmergencySos,
+} from "../services/guestApi";
 import type {
     AssignedHospital,
     Facility,
@@ -156,7 +161,7 @@ function trackingMessageFromStatus(status?: string): string {
     }
 
     if (normalizedStatus === "ON_THE_WAY") {
-        return guestStrings.trackingFallback;
+        return guestStrings.trackingAssigned;
     }
 
     return guestStrings.trackingFallback;
@@ -239,7 +244,11 @@ export default function UserPage() {
     const [trackingStatusMessage, setTrackingStatusMessage] = useState<string>(guestStrings.trackingFallback);
     const [trackingToken, setTrackingToken] = useState<string | null>(null);
     const [sessionRestoreMessage, setSessionRestoreMessage] = useState<string | null>(null);
+    const [trackingDetailHighlighted, setTrackingDetailHighlighted] = useState(false);
     const restoreProbeRef = useRef<{ key: string; at: number } | null>(null);
+    const trackingDetailHighlightTimerRef = useRef<number | null>(null);
+    const desktopTrackingDetailRef = useRef<HTMLDivElement | null>(null);
+    const mobileTrackingDetailRef = useRef<HTMLDivElement | null>(null);
 
     const animatedAmbulancePosition = useAnimatedPosition(ambulanceTargetPosition, 800);
     const displayedRoutePath = useTrimmedRoutePath(
@@ -247,6 +256,7 @@ export default function UserPage() {
         mode === "tracking" || mode === "completed" ? animatedAmbulancePosition : null,
         activeRequestId,
     );
+    const mapRoutePath = mode === "tracking" || mode === "completed" ? displayedRoutePath : [];
 
     const lookupPosition = useMemo<[number, number]>(() => currentPosition ?? HCMC_CENTER, [currentPosition]);
 
@@ -616,25 +626,22 @@ export default function UserPage() {
         setActiveRequestId(response.request_id);
         setTrackingToken(response.tracking_token ?? null);
         setSosPosition(victimPosition);
-        setAssignedHospital(response.assigned_hospital ?? null);
+
+        const resolvedHospital = resolveAssignedHospitalFromSos(response, victimPosition);
+        setAssignedHospital(resolvedHospital);
 
         const parsedRoute = toRouteLatLng(response.route_path);
-        if (parsedRoute.length >= 2) {
-            setRoutePath(parsedRoute);
-        } else if (response.assigned_hospital) {
-            setRoutePath([
-                [response.assigned_hospital.lat, response.assigned_hospital.lng],
-                [victimPosition[0], victimPosition[1]],
-            ]);
+        const nextMode = guestModeFromEmergencyStatus(response.status);
+
+        if (nextMode === "tracking" || nextMode === "completed") {
+            setRoutePath(parsedRoute.length >= 3 ? parsedRoute : []);
         } else {
             setRoutePath([]);
         }
 
-        const nextMode = guestModeFromEmergencyStatus(response.status);
-
         if (nextMode === "tracking") {
-            if (response.assigned_hospital) {
-                setAmbulanceTargetPosition([response.assigned_hospital.lat, response.assigned_hospital.lng]);
+            if (resolvedHospital) {
+                setAmbulanceTargetPosition([resolvedHospital.lat, resolvedHospital.lng]);
             } else if (response.ambulance_position) {
                 setAmbulanceTargetPosition([response.ambulance_position.lat, response.ambulance_position.lng]);
             } else {
@@ -655,7 +662,7 @@ export default function UserPage() {
         } else if (nextMode === "awaiting_dispatch") {
             setAmbulanceTargetPosition(null);
             setEtaMinutes(null);
-            setTrackingStatusMessage(awaitingDispatchMessage(response.assigned_hospital ?? null));
+            setTrackingStatusMessage(awaitingDispatchMessage(resolvedHospital ?? undefined));
         } else {
             setAmbulanceTargetPosition(null);
             setEtaMinutes(null);
@@ -826,6 +833,15 @@ export default function UserPage() {
     const handleTrackingEvent = useCallback(
         (event: TrackingSocketEvent) => {
             const normalizedStatus = event.status ? event.status.toUpperCase() : "";
+            const hasAmbulancePosition = typeof event.lat === "number" && typeof event.lng === "number";
+            const hasRoutePayload = Boolean(event.route_path);
+            const ambulancePoint: [number, number] | null = hasAmbulancePosition
+                ? [Number(event.lat), Number(event.lng)]
+                : null;
+
+            if (normalizedStatus === "ON_THE_WAY" || hasAmbulancePosition || hasRoutePayload) {
+                setMode((current) => (current === "awaiting_dispatch" ? "tracking" : current));
+            }
 
             if (normalizedStatus === "ASSIGNED") {
                 setMode((current) => (current === "awaiting_dispatch" ? "tracking" : current));
@@ -836,22 +852,28 @@ export default function UserPage() {
                 if (typeof event.eta_minutes === "number" && Number.isFinite(event.eta_minutes)) {
                     setEtaMinutes(Math.max(1, Math.round(event.eta_minutes)));
                 }
+                if (event.route_path) {
+                    const parsedRoute = toRouteLatLng(event.route_path);
+                    if (parsedRoute.length >= 3) {
+                        setRoutePath(parsedRoute);
+                    }
+                }
                 return;
             }
 
-            if (typeof event.lat === "number" && typeof event.lng === "number") {
-                setAmbulanceTargetPosition([event.lat, event.lng]);
-            }
-
-            if (typeof event.eta_minutes === "number" && Number.isFinite(event.eta_minutes)) {
-                setEtaMinutes(Math.max(1, Math.round(event.eta_minutes)));
+            if (ambulancePoint) {
+                setAmbulanceTargetPosition(ambulancePoint);
             }
 
             if (event.route_path) {
                 const parsedRoute = toRouteLatLng(event.route_path);
-                if (parsedRoute.length >= 2) {
+                if (parsedRoute.length >= 3) {
                     setRoutePath(parsedRoute);
                 }
+            }
+
+            if (typeof event.eta_minutes === "number" && Number.isFinite(event.eta_minutes)) {
+                setEtaMinutes(Math.max(1, Math.round(event.eta_minutes)));
             }
 
             if (normalizedStatus === "COMPLETED") {
@@ -916,8 +938,35 @@ export default function UserPage() {
     };
 
     const handleViewTrackingDetail = () => {
+        setSelectedFacility(null);
+        setMode((current) => (current === "awaiting_dispatch" ? "tracking" : current));
         setTrackingFocusNonce((value) => value + 1);
+        setTrackingDetailHighlighted(true);
+
+        if (trackingDetailHighlightTimerRef.current !== null) {
+            window.clearTimeout(trackingDetailHighlightTimerRef.current);
+        }
+        trackingDetailHighlightTimerRef.current = window.setTimeout(() => {
+            setTrackingDetailHighlighted(false);
+            trackingDetailHighlightTimerRef.current = null;
+        }, 1600);
+
+        window.requestAnimationFrame(() => {
+            const isMobileViewport = window.matchMedia("(max-width: 767px)").matches;
+            const focusTarget = isMobileViewport
+                ? mobileTrackingDetailRef.current ?? desktopTrackingDetailRef.current
+                : desktopTrackingDetailRef.current ?? mobileTrackingDetailRef.current;
+            focusTarget?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+        });
     };
+
+    useEffect(() => {
+        return () => {
+            if (trackingDetailHighlightTimerRef.current !== null) {
+                window.clearTimeout(trackingDetailHighlightTimerRef.current);
+            }
+        };
+    }, []);
 
     const emptyFacilityMessage =
         !isFacilityLoading && !facilityError && facilities.length === 0
@@ -1095,52 +1144,57 @@ export default function UserPage() {
                             </>
                         ) : (
                             <div className="subtle-scrollbar mt-3 min-h-0 flex-1 overflow-y-auto pr-1 pb-5">
-                                <div className="shrink-0 rounded-2xl border border-red-100 bg-red-50/50 p-4 shadow-sm">
-                                <h2 className="text-xs font-extrabold uppercase tracking-wider text-red-900">
-                                    {mode === "awaiting_dispatch"
-                                        ? guestStrings.awaitingDispatchBadge
-                                        : guestStrings.trackingModeBadge}
-                                </h2>
-                                <p className="mt-2 text-lg font-bold leading-snug text-slate-900">
-                                    {mode === "completed" ? guestStrings.rescueCompleted : trackingStatusMessage}
-                                </p>
-                                {mode === "tracking" && etaMinutes !== null ? (
-                                    <p className="mt-2 text-base font-semibold text-violet-950">
-                                        {guestStrings.trackingEtaPrefix} ~{etaMinutes} {guestStrings.trackingEtaSuffix}
+                                <div
+                                    ref={desktopTrackingDetailRef}
+                                    className={`shrink-0 rounded-2xl border border-red-100 bg-red-50/50 p-4 shadow-sm transition-all duration-300 ${
+                                        trackingDetailHighlighted ? "ring-4 ring-violet-300 ring-offset-2 ring-offset-white" : ""
+                                    }`}
+                                >
+                                    <h2 className="text-xs font-extrabold uppercase tracking-wider text-red-900">
+                                        {mode === "awaiting_dispatch"
+                                            ? guestStrings.awaitingDispatchBadge
+                                            : guestStrings.trackingModeBadge}
+                                    </h2>
+                                    <p className="mt-2 text-lg font-bold leading-snug text-slate-900">
+                                        {mode === "completed" ? guestStrings.rescueCompleted : trackingStatusMessage}
                                     </p>
-                                ) : null}
-                                {(mode === "awaiting_dispatch" || mode === "tracking") && assignedHospital ? (
-                                    <div className="mt-3 rounded-xl border border-white bg-white p-3 shadow-sm">
-                                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                            {guestStrings.assignedHospitalLabel}
+                                    {mode === "tracking" && etaMinutes !== null ? (
+                                        <p className="mt-2 text-base font-semibold text-violet-950">
+                                            {guestStrings.trackingEtaPrefix} ~{etaMinutes} {guestStrings.trackingEtaSuffix}
                                         </p>
-                                        <p className="mt-1 text-base font-bold text-slate-900">{assignedHospital.name}</p>
-                                        {(() => {
-                                            const hospitalTel = telHrefFromDisplay(assignedHospital.hotline);
-                                            const hospitalPhoneLabel =
-                                                assignedHospital.hotline || guestStrings.detailPhoneFallback;
-                                            return hospitalTel ? (
-                                                <>
-                                                    <a
-                                                        className="mt-2 block break-all text-2xl font-extrabold tracking-tight text-slate-900 underline decoration-emerald-300 decoration-2 underline-offset-2"
-                                                        href={hospitalTel}
-                                                    >
-                                                        {hospitalPhoneLabel}
-                                                    </a>
-                                                    <a
-                                                        className="mt-2 flex min-h-12 items-center justify-center rounded-xl bg-emerald-600 text-base font-extrabold text-white shadow hover:bg-emerald-500"
-                                                        href={hospitalTel}
-                                                    >
-                                                        {guestStrings.callNowButton}
-                                                    </a>
-                                                </>
-                                            ) : (
-                                                <p className="mt-2 text-xl font-bold text-slate-800">{hospitalPhoneLabel}</p>
-                                            );
-                                        })()}
-                                    </div>
-                                ) : null}
-                            </div>
+                                    ) : null}
+                                    {(mode === "awaiting_dispatch" || mode === "tracking") && assignedHospital ? (
+                                        <div className="mt-3 rounded-xl border border-white bg-white p-3 shadow-sm">
+                                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                                {guestStrings.assignedHospitalLabel}
+                                            </p>
+                                            <p className="mt-1 text-base font-bold text-slate-900">{assignedHospital.name}</p>
+                                            {(() => {
+                                                const hospitalTel = telHrefFromDisplay(assignedHospital.hotline);
+                                                const hospitalPhoneLabel =
+                                                    assignedHospital.hotline || guestStrings.detailPhoneFallback;
+                                                return hospitalTel ? (
+                                                    <>
+                                                        <a
+                                                            className="mt-2 block break-all text-2xl font-extrabold tracking-tight text-slate-900 underline decoration-emerald-300 decoration-2 underline-offset-2"
+                                                            href={hospitalTel}
+                                                        >
+                                                            {hospitalPhoneLabel}
+                                                        </a>
+                                                        <a
+                                                            className="mt-2 flex min-h-12 items-center justify-center rounded-xl bg-emerald-600 text-base font-extrabold text-white shadow hover:bg-emerald-500"
+                                                            href={hospitalTel}
+                                                        >
+                                                            {guestStrings.callNowButton}
+                                                        </a>
+                                                    </>
+                                                ) : (
+                                                    <p className="mt-2 text-xl font-bold text-slate-800">{hospitalPhoneLabel}</p>
+                                                );
+                                            })()}
+                                        </div>
+                                    ) : null}
+                                </div>
                             </div>
                         )}
                     </div>
@@ -1196,7 +1250,7 @@ export default function UserPage() {
                         sosPosition={sosPosition}
                         assignedHospital={assignedHospital}
                         ambulancePosition={animatedAmbulancePosition}
-                        routePath={displayedRoutePath}
+                        routePath={mapRoutePath}
                         trackingFocusNonce={trackingFocusNonce}
                         layoutSignature={mapLayoutSignature}
                     />
@@ -1204,9 +1258,27 @@ export default function UserPage() {
 
                 <header className="pointer-events-none absolute left-0 right-0 top-0 z-[690] p-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:hidden">
                     <div className="pointer-events-auto mx-auto flex w-full max-w-[min(100%,28rem)] items-center justify-between gap-2 sm:max-w-[32rem]">
-                        <span className="min-w-[1px]" aria-hidden="true" />
+                        {!isLoggedIn ? (
+                            <Link
+                                to="/login"
+                                className="inline-flex min-h-11 shrink-0 items-center rounded-xl bg-white/95 px-3 text-xs font-semibold text-violet-800 shadow hover:bg-white"
+                            >
+                                Đăng nhập
+                            </Link>
+                        ) : (
+                            <button
+                                className="inline-flex min-h-11 shrink-0 items-center rounded-xl bg-white/95 px-3 text-xs font-semibold text-slate-700 shadow hover:bg-white"
+                                type="button"
+                                onClick={() => {
+                                    logout();
+                                    window.location.reload();
+                                }}
+                            >
+                                Đăng xuất
+                            </button>
+                        )}
                         <button
-                            className="min-h-12 rounded-xl bg-white/95 px-4 text-sm font-semibold text-violet-900 shadow hover:bg-white"
+                            className="min-h-12 min-w-[7rem] rounded-xl bg-white/95 px-4 text-sm font-semibold text-violet-900 shadow hover:bg-white"
                             type="button"
                             onClick={() => {
                                 void acquireCurrentLocation();
@@ -1215,6 +1287,16 @@ export default function UserPage() {
                         >
                             {guestStrings.locateButton}
                         </button>
+                        {isLoggedIn ? (
+                            <Link
+                                to="/profile"
+                                className="inline-flex min-h-11 shrink-0 items-center rounded-xl bg-white/95 px-3 text-xs font-semibold text-violet-800 shadow hover:bg-white"
+                            >
+                                Hồ sơ
+                            </Link>
+                        ) : (
+                            <span className="min-w-[1px]" aria-hidden="true" />
+                        )}
                     </div>
 
                     <div
@@ -1256,11 +1338,35 @@ export default function UserPage() {
 
                 <TrackingStatusBar
                     visible={mode === "tracking" || mode === "awaiting_dispatch"}
+                    mode={mode === "tracking" ? "tracking" : "awaiting_dispatch"}
+                    assignedHospital={assignedHospital}
                     etaMinutes={mode === "tracking" ? etaMinutes : null}
                     statusMessage={trackingStatusMessage}
                     isReconnecting={isReconnecting}
                     browserOnline={browserOnline}
                 />
+
+                {(mode === "awaiting_dispatch" || mode === "tracking") && assignedHospital ? (
+                    <div className="pointer-events-none absolute inset-x-3 bottom-[max(5.5rem,calc(5rem+env(safe-area-inset-bottom)))] z-[680] md:hidden">
+                        <div
+                            ref={mobileTrackingDetailRef}
+                            className={`pointer-events-auto rounded-2xl border border-red-100 bg-white/95 p-3 shadow-lg transition-all duration-300 ${
+                                trackingDetailHighlighted ? "ring-4 ring-violet-300 ring-offset-2 ring-offset-white" : ""
+                            }`}
+                        >
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-red-800">
+                                {mode === "awaiting_dispatch"
+                                    ? guestStrings.awaitingDispatchBadge
+                                    : guestStrings.trackingModeBadge}
+                            </p>
+                            <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                {guestStrings.nearestHospitalLabel}
+                            </p>
+                            <p className="mt-0.5 text-base font-bold text-slate-900">{assignedHospital.name}</p>
+                            <p className="mt-1 text-sm text-slate-700">{trackingStatusMessage}</p>
+                        </div>
+                    </div>
+                ) : null}
 
                 {mode === "browse" && !selectedFacility ? (
                     <div className="md:hidden">

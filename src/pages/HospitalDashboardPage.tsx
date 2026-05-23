@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import AppPageShell from "../components/AppPageShell";
+import AppToast from "../components/AppToast";
 import AdminDispatchMap from "../components/AdminDispatchMap";
 import EmergencyTable from "../components/EmergencyTable";
 import { formControlFieldClassName } from "../constants/formClasses";
@@ -224,39 +225,14 @@ export default function HospitalDashboardPage() {
     return { label: "Bảo trì", cls: "border-slate-200 bg-slate-100 text-slate-700" };
   };
 
-  const handleArrived = useCallback(async (emergencyId: string) => {
-    try {
-      const id = Number(emergencyId);
-      // Optimistic UI: show arrived state right after click.
-      setEmergencies((prev) =>
-        prev.map((row) => (Number(row.id) === id ? { ...row, status: "ARRIVED" } : row)),
-      );
-      await adminApi.updateEmergencyStatus(id, "in_progress");
-      await refreshEmergencies();
-      await reloadAmbulances();
-      setPollError(null);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Không thể cập nhật trạng thái đã đến nơi";
-      setPollError(msg);
-    }
-  }, [refreshEmergencies, reloadAmbulances]);
-
-  const handleComplete = useCallback(async (emergencyId: string) => {
-    try {
-      const id = Number(emergencyId);
-      // Optimistic UI: completed should be visible immediately.
-      setEmergencies((prev) =>
-        prev.map((row) => (Number(row.id) === id ? { ...row, status: "COMPLETED" } : row)),
-      );
-      await adminApi.updateEmergencyStatus(id, "completed");
-      await refreshEmergencies();
-      await reloadAmbulances();
-      setPollError(null);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Không thể cập nhật trạng thái hoàn thành";
-      setPollError(msg);
-    }
-  }, [refreshEmergencies, reloadAmbulances]);
+  const normalizeSocketEmergencyStatus = (raw: unknown): "WAITING" | "ASSIGNED" | "ON_THE_WAY" | "COMPLETED" | null => {
+    const s = String(raw ?? "").trim().toUpperCase();
+    if (s === "COMPLETED" || s === "DONE") return "COMPLETED";
+    if (s === "ASSIGNED") return "ASSIGNED";
+    if (s === "ON_THE_WAY" || s === "IN_PROGRESS" || s === "ARRIVED") return "ON_THE_WAY";
+    if (s === "WAITING" || s === "PENDING") return "WAITING";
+    return null;
+  };
 
   // Initial load once. After that, dashboard syncs by realtime socket events.
   useEffect(() => {
@@ -336,11 +312,26 @@ export default function HospitalDashboardPage() {
       const lng = payload?.lng;
       if (!Number.isFinite(requestId) || typeof lat !== "number" || typeof lng !== "number") return;
       setAmbulancePositionsByRequest((prev) => ({ ...prev, [requestId]: [lat, lng] }));
-      // GPS updates imply ambulance is moving; reflect status realtime on UI.
+
+      const nextStatus = normalizeSocketEmergencyStatus(payload?.status);
+      if (nextStatus === "COMPLETED") {
+        setEmergencies((prev) =>
+          prev.map((row) => (Number(row.id) === Number(requestId) ? { ...row, status: "COMPLETED" } : row)),
+        );
+        refreshEmergencies()
+          .then(() => reloadAmbulances())
+          .catch(() => {
+            setPollError("Không thể đồng bộ trạng thái hoàn thành ca cấp cứu");
+          });
+        return;
+      }
+
+      // Default to moving state if backend status is absent in payload.
+      const fallbackStatus = nextStatus ?? "ON_THE_WAY";
       setEmergencies((prev) =>
         prev.map((row) =>
-          Number(row.id) === Number(requestId) && row.status !== "ARRIVED" && row.status !== "COMPLETED"
-            ? { ...row, status: "ON_THE_WAY" }
+          Number(row.id) === Number(requestId) && row.status !== "COMPLETED"
+            ? { ...row, status: fallbackStatus }
             : row,
         ),
       );
@@ -363,6 +354,31 @@ export default function HospitalDashboardPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [joinRequestRooms, playBeep, refreshEmergencies, reloadAmbulances, resolveSocketUrl]);
+
+  // Safety sync: while there are active cases, periodically reconcile with backend
+  // so UI cannot stay stuck in "Đang di chuyển" after connection glitches.
+  useEffect(() => {
+    const hasActiveCases = emergencies.some((row) => {
+      const s = String(row.status).toUpperCase();
+      return s === "WAITING" || s === "ASSIGNED" || s === "ON_THE_WAY" || s === "ARRIVED";
+    });
+
+    if (!hasActiveCases) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      refreshEmergencies()
+        .then(() => reloadAmbulances())
+        .catch(() => {
+          // Silent retry loop; avoid spamming UI with transient network errors.
+        });
+    }, 10000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [emergencies, refreshEmergencies, reloadAmbulances]);
 
   // Avoid stale map focus when user switches browser tabs.
   useEffect(() => {
@@ -400,7 +416,7 @@ export default function HospitalDashboardPage() {
             </article>
           </section>
 
-          <section className="lg:col-span-2 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <section className="lg:col-span-2 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-lg font-bold tracking-tight text-slate-900">Đội xe cứu thương</h2>
@@ -427,7 +443,6 @@ export default function HospitalDashboardPage() {
                   }}
                   placeholder="VD: 59H-CR-06"
                   disabled={ambulanceSaving}
-                  aria-invalid={ambulanceFormError != null ? "true" : "false"}
                   autoComplete="off"
                 />
                 <span className="mt-1 block text-[11px] text-slate-500">
@@ -436,7 +451,7 @@ export default function HospitalDashboardPage() {
               </label>
               <button
                 type="submit"
-                className="h-10 shrink-0 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+                className="h-10 w-full shrink-0 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50 sm:w-auto"
                 disabled={ambulanceSaving}
               >
                 {ambulanceSaving ? "Đang lưu..." : "Thêm xe"}
@@ -459,9 +474,9 @@ export default function HospitalDashboardPage() {
                   return (
                     <li
                       key={String(a.id)}
-                      className={`min-w-[160px] rounded-xl border px-3 py-2 shadow-sm ${ui.cls}`}
+                      className={`min-w-[140px] max-w-full rounded-xl border px-3 py-2 shadow-sm ${ui.cls}`}
                     >
-                      <p className="font-mono text-sm font-bold tracking-tight">{a.plate_number}</p>
+                      <p className="break-all font-mono text-sm font-bold tracking-tight">{a.plate_number}</p>
                       <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-wide opacity-90">{ui.label}</p>
                       {status === "maintenance" ? (
                         <button
@@ -488,18 +503,16 @@ export default function HospitalDashboardPage() {
           </section>
 
           <section className="flex flex-col rounded-3xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 bg-white px-6 py-5">
+            <div className="border-b border-slate-100 bg-white px-4 py-4 sm:px-6 sm:py-5">
               <h2 className="text-lg font-bold tracking-tight text-slate-900">Danh sách ca cấp cứu</h2>
               <p className="mt-1 text-sm text-slate-500">Các yêu cầu đang chờ phản hồi từ trung tâm</p>
             </div>
-            <div className="flex-1 overflow-x-auto bg-slate-50/30 p-6">
+            <div className="flex-1 overflow-x-auto bg-slate-50/30 p-4 sm:p-6">
               {pollError ? <div className="text-red-600">{pollError}</div> : null}
               <EmergencyTable
                 rows={emergencies}
                 ambulances={ambulances}
                 onDispatch={handleDispatch}
-                onArrived={handleArrived}
-                onComplete={handleComplete}
               />
             </div>
           </section>
@@ -508,10 +521,10 @@ export default function HospitalDashboardPage() {
             className="flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
             aria-label="Bản đồ theo dõi"
           >
-            <div className="border-b border-slate-100 bg-white px-6 py-5">
+            <div className="border-b border-slate-100 bg-white px-4 py-4 sm:px-6 sm:py-5">
               <h2 className="text-lg font-bold tracking-tight text-slate-900">Bản đồ điều phối</h2>
             </div>
-            <div className="p-6 flex-1 flex flex-col relative">
+            <div className="relative flex flex-1 flex-col p-4 sm:p-6">
               <div className="h-full min-h-[360px] w-full">
                 <AdminDispatchMap
                   defaultCenter={HCMC_CENTER}
@@ -524,17 +537,9 @@ export default function HospitalDashboardPage() {
           </section>
         </div>
       {showAlert ? (
-        <div className="pointer-events-auto fixed right-6 top-6 z-[950] max-w-[min(320px,calc(100%-3rem))] rounded-xl bg-red-600 py-3 pl-4 pr-10 text-white shadow-lg">
-          <button
-            className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-md text-white/80 hover:bg-white/20 hover:text-white"
-            type="button"
-            aria-label="Đóng thông báo"
-            onClick={() => setShowAlert(false)}
-          >
-            ×
-          </button>
+        <AppToast variant="solid-error" onClose={() => setShowAlert(false)}>
           <strong>Có ca cấp cứu mới đang chờ xử lý</strong>
-        </div>
+        </AppToast>
       ) : null}
     </AppPageShell>
   );

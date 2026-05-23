@@ -34,6 +34,9 @@ export function trimRouteFromPosition(
     current: LatLng,
     minProgressIndex = 0,
 ): { path: LatLng[]; progressIndex: number } {
+    const MAX_OFF_ROUTE_TRIM_METERS = 120;
+    const CONNECT_CURRENT_TO_ROUTE_METERS = 50;
+
     if (route.length === 0) {
         return { path: [], progressIndex: 0 };
     }
@@ -54,23 +57,34 @@ export function trimRouteFromPosition(
         }
     }
 
+    // Ignore noisy GPS jumps that are too far from the route, keep rendering
+    // the current known route instead of drawing a direct fallback segment.
+    if (bestDist > MAX_OFF_ROUTE_TRIM_METERS) {
+        const stableStart = Math.min(Math.max(0, minProgressIndex), route.length - 2);
+        return { path: route.slice(stableStart), progressIndex: stableStart };
+    }
+
     const lastPoint = route[route.length - 1];
     const distToEnd = haversineDistanceMeters(current, lastPoint);
     if (distToEnd <= bestDist) {
         if (distToEnd < 8) {
             return { path: [], progressIndex: route.length - 1 };
         }
-        return { path: [current, lastPoint], progressIndex: route.length - 1 };
+        const tailStart = Math.max(minProgressIndex, route.length - 2);
+        return { path: route.slice(tailStart), progressIndex: route.length - 1 };
     }
 
     const progressIndex = Math.max(minProgressIndex, bestSegment + 1);
     const ahead = route.slice(progressIndex);
-    const path = ahead.length > 0 && haversineDistanceMeters(current, ahead[0]) > 3
-        ? [current, ...ahead]
-        : ahead;
+    const shouldConnectCurrent =
+        ahead.length > 0 &&
+        haversineDistanceMeters(current, ahead[0]) > 3 &&
+        haversineDistanceMeters(current, ahead[0]) <= CONNECT_CURRENT_TO_ROUTE_METERS;
+    const path = shouldConnectCurrent ? [current, ...ahead] : ahead;
 
     if (path.length < 2) {
-        return { path: [current, lastPoint], progressIndex: route.length - 1 };
+        const tailStart = Math.max(minProgressIndex, route.length - 2);
+        return { path: route.slice(tailStart), progressIndex: route.length - 1 };
     }
 
     return { path, progressIndex };

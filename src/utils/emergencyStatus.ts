@@ -10,7 +10,8 @@ export function normalizeEmergencyStatus(raw: unknown): EmergencyStatus {
     if (s === "PENDING" || s === "WAITING") return "WAITING";
     if (s === "ASSIGNED") return "ASSIGNED";
     if (s === "ON_THE_WAY") return "ON_THE_WAY";
-    if (s === "IN_PROGRESS" || s === "ARRIVED") return "ARRIVED";
+    if (s === "IN_PROGRESS") return "ON_THE_WAY";
+    if (s === "ARRIVED") return "ARRIVED";
     if (s === "COMPLETED" || s === "DONE") return "COMPLETED";
     if (s === "CANCELLED") return "COMPLETED";
     return "WAITING";

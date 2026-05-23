@@ -82,13 +82,16 @@ export default function LoginPage() {
         },
       });
 
+      const containerWidth = googleButtonRef.current.clientWidth;
+      const buttonWidth = Math.min(320, Math.max(220, Math.floor(containerWidth)));
+
       googleButtonRef.current.innerHTML = "";
       googleApi.accounts.id.renderButton(googleButtonRef.current, {
         type: "standard",
         shape: "pill",
         size: "large",
         text: "signin_with",
-        width: 320,
+        width: buttonWidth,
       });
     };
 
