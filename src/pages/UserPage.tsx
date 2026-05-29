@@ -256,7 +256,10 @@ export default function UserPage() {
         mode === "tracking" || mode === "completed" ? animatedAmbulancePosition : null,
         activeRequestId,
     );
-    const mapRoutePath = mode === "tracking" || mode === "completed" ? displayedRoutePath : [];
+    const mapRoutePath =
+        mode === "awaiting_dispatch" || mode === "tracking" || mode === "completed"
+            ? displayedRoutePath
+            : [];
 
     const lookupPosition = useMemo<[number, number]>(() => currentPosition ?? HCMC_CENTER, [currentPosition]);
 
@@ -633,7 +636,7 @@ export default function UserPage() {
         const parsedRoute = toRouteLatLng(response.route_path);
         const nextMode = guestModeFromEmergencyStatus(response.status);
 
-        if (nextMode === "tracking" || nextMode === "completed") {
+        if (nextMode === "awaiting_dispatch" || nextMode === "tracking" || nextMode === "completed") {
             setRoutePath(parsedRoute.length >= 3 ? parsedRoute : []);
         } else {
             setRoutePath([]);

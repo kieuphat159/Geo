@@ -273,7 +273,6 @@ export default function VietnamMap({
 
             {currentPosition ? <Marker position={currentPosition} icon={userLocationIcon} /> : null}
             {sosPosition ? <Marker position={sosPosition} icon={sosPulseIcon} /> : null}
-            {hospitalPosition ? <Marker position={hospitalPosition} icon={hospitalIcon} /> : null}
             {mode === "tracking" && ambulancePosition ? (
                 <Marker
                     position={ambulancePosition}
